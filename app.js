@@ -47,8 +47,8 @@ let aiSending = false;
 const mcpToolDefinitions = [
   { name: 'get_project_state', description: '读取当前桌游项目的版图、单卡、卡组、标签和试玩摘要。', parameters: { type: 'object', properties: {} } },
   { name: 'update_project', description: '更新项目名称或描述。', parameters: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' } } } },
-  { name: 'create_card', description: '创建一张单卡，可设置卡名、效果、标签、稀有度、编号、颜色、插图符号、模板和尺寸。', parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, effect: { type: 'string' }, tag: { type: 'string' }, rarity: { type: 'string' }, number: { type: 'string' }, color: { type: 'string' }, art: { type: 'string' }, template: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' } } } },
-  { name: 'update_card', description: '更新已有单卡的内容、元数据、模板或尺寸。', parameters: { type: 'object', required: ['cardId'], properties: { cardId: { type: 'string' }, name: { type: 'string' }, effect: { type: 'string' }, tag: { type: 'string' }, rarity: { type: 'string' }, number: { type: 'string' }, art: { type: 'string' }, color: { type: 'string' }, template: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' } } } },
+  { name: 'create_card', description: '创建一张单卡，可设置卡名、效果、标签、稀有度、编号、颜色、插图符号、模板和尺寸。effect 支持安全 HTML，可使用 strong/em/u、span style="color:...;background-color:..."、br、ul/ol 等表现颜色、底色和排版。', parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, effect: { type: 'string' }, tag: { type: 'string' }, rarity: { type: 'string' }, number: { type: 'string' }, color: { type: 'string' }, art: { type: 'string' }, template: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' } } } },
+  { name: 'update_card', description: '更新已有单卡的内容、元数据、模板或尺寸。effect 支持安全 HTML，可保留飞书粘贴的文字颜色、底色、粗体、斜体、下划线和列表排版。', parameters: { type: 'object', required: ['cardId'], properties: { cardId: { type: 'string' }, name: { type: 'string' }, effect: { type: 'string' }, tag: { type: 'string' }, rarity: { type: 'string' }, number: { type: 'string' }, art: { type: 'string' }, color: { type: 'string' }, template: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' } } } },
   { name: 'delete_card', description: '删除一张单卡；卡组中的引用会保留为缺失项。', parameters: { type: 'object', required: ['cardId'], properties: { cardId: { type: 'string' } } } },
   { name: 'create_deck', description: '创建一个空卡组。', parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, description: { type: 'string' } } } },
   { name: 'update_deck', description: '更新已有卡组名称或描述。', parameters: { type: 'object', required: ['deckId'], properties: { deckId: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' } } } },
@@ -77,9 +77,26 @@ const mcpToolDefinitions = [
 
 function loadAISettings() {
   const defaults = { configured: false, dismissed: false, endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '' };
-  try { return { ...defaults, ...(JSON.parse(localStorage.getItem('cardfoundry_ai_settings')) || {}) }; } catch { return defaults; }
+  try { return normalizeAISettings({ ...defaults, ...(JSON.parse(localStorage.getItem('cardfoundry_ai_settings')) || {}) }); } catch { return defaults; }
 }
 function saveAISettings() { try { localStorage.setItem('cardfoundry_ai_settings', JSON.stringify(aiSettings)); } catch { /* local storage unavailable */ } if (db) { const tx = db.transaction('appState', 'readwrite'); tx.objectStore('appState').put({ id: 'aiSettings', value: aiSettings }); } }
+function normalizeAISettings(settings) {
+  const defaults = { configured: false, dismissed: false, endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '' };
+  const normalized = { ...defaults, ...(settings || {}) };
+  const hasExplicitConfig = normalized.configured === true
+    || Boolean(String(normalized.apiKey || '').trim())
+    || String(normalized.endpoint || '').replace(/\/+$/, '') !== defaults.endpoint
+    || String(normalized.model || '').trim() !== defaults.model;
+  if (hasExplicitConfig && normalized.endpoint && normalized.model) {
+    normalized.configured = true;
+    normalized.dismissed = false;
+  }
+  return normalized;
+}
+function hasAIConfiguration(settings = aiSettings) {
+  const normalized = normalizeAISettings(settings);
+  return Boolean(normalized.configured && String(normalized.endpoint || '').trim() && String(normalized.model || '').trim());
+}
 
 function loadLocal() {
   try { return JSON.parse(localStorage.getItem('cardfoundry_state')); } catch { return null; }
@@ -114,7 +131,7 @@ async function hydrate() {
     const aiSettingsRequest = store.get('aiSettings');
     currentRequest.onsuccess = () => { if (currentRequest.result?.value) state = currentRequest.result.value; };
     projectsRequest.onsuccess = () => { if (projectsRequest.result?.value) projectLibrary = projectsRequest.result.value; };
-    aiSettingsRequest.onsuccess = () => { if (aiSettingsRequest.result?.value) aiSettings = aiSettingsRequest.result.value; };
+    aiSettingsRequest.onsuccess = () => { if (aiSettingsRequest.result?.value) aiSettings = normalizeAISettings(aiSettingsRequest.result.value); };
     tx.oncomplete = resolve;
     tx.onerror = resolve;
   });
@@ -260,9 +277,10 @@ function safeAIUrl(value = '') {
 
 function sanitizeAIHTML(value = '') {
   if (typeof DOMParser === 'undefined') return esc(value).replace(/\n/g, '<br>');
-  const allowed = new Set(['A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'DIV', 'EM', 'H1', 'H2', 'H3', 'HR', 'I', 'IMG', 'LI', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'U', 'UL']);
+  const allowed = new Set(['A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'DIV', 'EM', 'FONT', 'H1', 'H2', 'H3', 'HR', 'I', 'IMG', 'LI', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'U', 'UL']);
   const blocked = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'TEMPLATE', 'NOSCRIPT']);
   const safeStyleProperties = ['color', 'background-color', 'font-weight', 'font-style', 'text-decoration', 'text-align', 'font-size', 'line-height'];
+  const safeColorValue = value => /^(?:#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([^)]{1,80}\)|[a-z]{1,24})$/i.test(String(value || '').trim());
   const parser = new DOMParser();
   const source = parser.parseFromString(String(value), 'text/html').body;
   const output = document.createElement('div');
@@ -295,9 +313,25 @@ function sanitizeAIHTML(value = '') {
       safeStyleProperties.forEach(property => {
         const styleValue = node.style.getPropertyValue(property).trim();
         if (styleValue && !/(?:url\s*\(|expression\s*\(|javascript\s*:|@import)/i.test(styleValue)) {
+          if ((property === 'color' || property === 'background-color') && !safeColorValue(styleValue)) return;
           element.style.setProperty(property, styleValue);
         }
       });
+      const background = node.style.getPropertyValue('background').trim();
+      if (!element.style.backgroundColor && safeColorValue(background)) element.style.backgroundColor = background;
+    }
+    // Feishu and some office clipboard providers still emit legacy color/
+    // bgcolor attributes instead of CSS declarations.
+    const legacyColor = node.getAttribute('color');
+    const legacyBackground = node.getAttribute('bgcolor') || node.getAttribute('background-color');
+    if (legacyColor && safeColorValue(legacyColor)) element.style.color = legacyColor.trim();
+    if (legacyBackground && safeColorValue(legacyBackground)) element.style.backgroundColor = legacyBackground.trim();
+    if (node.tagName === 'FONT' && (legacyColor || legacyBackground)) {
+      const replacement = document.createElement('span');
+      replacement.style.cssText = element.style.cssText;
+      [...node.childNodes].forEach(child => copy(child, replacement));
+      parent.appendChild(replacement);
+      return;
     }
     [...node.childNodes].forEach(child => copy(child, element));
     parent.appendChild(element);
@@ -357,6 +391,30 @@ function renderAIContent(value = '') {
     if (node.nodeValue.trim()) { const span = document.createElement('span'); span.innerHTML = markdownInline(node.nodeValue); node.replaceWith(span); }
   });
   return wrapper.innerHTML;
+}
+
+function sanitizeAIInputHTML(value = '') {
+  return sanitizeAIHTML(value).trim();
+}
+function aiInputPayload(input) {
+  const plainText = String(input?.innerText || '').replace(/\u00a0/g, ' ').trim();
+  const html = sanitizeAIInputHTML(input?.innerHTML || '');
+  const hasRichFormatting = /<(?:b|strong|em|i|u|s|del|span|div|p|br|ul|ol|li|blockquote|pre|code|table|tr|td|th)\b|\sstyle=/i.test(html);
+  if (!plainText && !html.replace(/<[^>]+>/g, '').trim()) return '';
+  return hasRichFormatting ? html : plainText;
+}
+function insertAIInputHTML(input, html, plainText = '') {
+  input.focus();
+  const safeHTML = sanitizeAIInputHTML(html || esc(plainText).replace(/\r?\n/g, '<br>'));
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) { input.insertAdjacentHTML('beforeend', safeHTML); return; }
+  const range = selection.getRangeAt(0);
+  if (!input.contains(range.commonAncestorContainer)) { input.insertAdjacentHTML('beforeend', safeHTML); return; }
+  range.deleteContents();
+  const fragment = range.createContextualFragment(safeHTML);
+  const last = fragment.lastChild;
+  range.insertNode(fragment);
+  if (last) { range.setStartAfter(last); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); }
 }
 
 function projectAIContext() {
@@ -667,7 +725,7 @@ async function requestAIModels(endpoint, apiKey) {
 }
 
 function openSetupWizard(force = false) {
-  if (!force && (aiSettings.configured || aiSettings.dismissed)) return;
+  if (!force && (hasAIConfiguration() || aiSettings.dismissed)) return;
   let step = 1;
   const renderStep = () => {
     const root = $('#modalRoot');
@@ -745,10 +803,10 @@ function executeMCPTool(name, args = {}) {
 }
 
 async function sendAIMessage(text) {
-  if (!aiSettings.configured || !aiSettings.endpoint || !aiSettings.model) { openSetupWizard(true); throw new Error('请先完成 API 设置'); }
+  if (!hasAIConfiguration()) { openSetupWizard(true); throw new Error('请先完成 API 设置'); }
   setAIStatus('AI 正在思考…');
   const tools = mcpToolDefinitions.map(tool => ({ type: 'function', function: tool }));
-  const system = `你是 CardFoundry 桌游设计助手。你可以通过工具修改用户当前项目。需要编辑时必须调用工具，不要假装修改。当前项目摘要：${JSON.stringify(projectAIContext())}`;
+  const system = `你是 CardFoundry 桌游设计助手。你可以通过工具修改用户当前项目。需要编辑时必须调用工具，不要假装修改。用户消息可能包含从飞书粘贴并清洗过的安全 HTML；必须理解并保留其中的语义与格式，包括文字颜色 color、底色 background-color、粗体、斜体、下划线、列表、表格和段落。创建或更新卡牌效果时，effect 可以使用安全 HTML，例如 <span style="color:#e97968;background-color:#fff1a8"><strong>重点效果</strong></span>；如用户要求保留粘贴格式，应将这些安全 HTML 格式写入 effect。当前项目摘要：${JSON.stringify(projectAIContext())}`;
   const endpoint = aiSettings.endpoint.replace(/\/$/, '').endsWith('/chat/completions') ? aiSettings.endpoint.replace(/\/$/, '') : `${aiSettings.endpoint.replace(/\/$/, '')}/chat/completions`;
   for (let round = 0; round < 6; round += 1) {
     const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream' };
@@ -779,7 +837,7 @@ async function sendAIMessage(text) {
 async function readAIStream(response) {
   // A few OpenAI-compatible local servers ignore stream=true. Keep a JSON
   // fallback so those endpoints continue to work while the normal path is SSE.
-  if (!response.body?.getReader || /application\/json/i.test(response.headers.get('content-type') || '')) {
+  if (!response.body?.getReader) {
     const data = await response.json(); return data.choices?.[0]?.message;
   }
   const reader = response.body.getReader();
@@ -1133,6 +1191,14 @@ function bindGlobal() {
   $('#aiContextSelect').addEventListener('change', event => switchAIContext(event.target.value));
   $('#aiNewContextButton').addEventListener('click', createAIContext);
   $('#aiDeleteContextButton').addEventListener('click', deleteAIContext);
+  $('#aiInput').addEventListener('paste', event => {
+    const clipboard = event.clipboardData;
+    if (!clipboard) return;
+    const html = clipboard.getData('text/html');
+    if (!html) return;
+    event.preventDefault();
+    insertAIInputHTML($('#aiInput'), html, clipboard.getData('text/plain'));
+  });
   $('#aiChatForm').addEventListener('submit', async event => {
     event.preventDefault();
     // requestSubmit() can be triggered by both the send button and Enter. Keep
@@ -1141,12 +1207,12 @@ function bindGlobal() {
     if (aiSending) return;
     const input = $('#aiInput');
     const sendButton = $('#aiSendButton');
-    const text = input.value.trim();
+    const text = aiInputPayload(input);
     if (!text) return;
 
     // Clear immediately, before making the network request. This prevents a
     // slow request (or an accidental second click) from reusing the prompt.
-    input.value = '';
+    input.innerHTML = '';
     aiSending = true;
     addAIMessage('user', text);
     sendButton.disabled = true;

@@ -18,7 +18,7 @@
 - AI 助手聊天侧栏：打开后占据右侧约三分之一，版图、单卡、卡组、试玩和导出页面会自动压缩并保留可用编辑区。
 - 试玩布局：版图在上方，右侧保留试玩操作栏，玩家手牌固定在最下方，支持将场上卡牌拖回手牌。
 - API 设置向导支持“获取模型列表”，会调用兼容服务的 `GET /models` 并将结果填入模型选择列表。
-- 页面动效：视图切换、面板进入、对象出现、卡牌悬停、弹窗和 AI 内容切换均有轻量动画，并尊重系统的减少动态效果设置。
+- UI 使用静态状态、悬停反馈和拖拽反馈，避免编辑区域重复入场或闪烁动效。
 - 本地 MCP-style 工具桥：`window.cardFoundryMCP.getTools()`、`call(name, args)`、`getContext()`，并提供 `request('initialize' | 'tools/list' | 'tools/call' | 'context/get')` 供宿主适配器接入。
 - MCP 工具覆盖项目、版图对象、单卡、标签、卡组精确数量，以及试玩副本中的抽牌、出牌、移动、横置、回手、入堆、洗堆和重置。
 
@@ -33,6 +33,10 @@ python3 -m http.server 4173
 然后打开：<http://127.0.0.1:4173/>。
 
 也可以直接双击 `index.html` 打开；不过部分浏览器在 `file://` 页面中会限制 IndexedDB 或本地文件选择，推荐使用静态服务器。
+
+## 发布到 GitHub Pages
+
+仓库已提供 `.github/workflows/deploy-pages.yml`，推送到 `main` 后会自动部署 `index.html`、`styles.css` 和 `app.js`。首次启用时请按照 [GITHUB_PAGES.md](GITHUB_PAGES.md) 在仓库设置中选择 **Settings → Pages → Source: GitHub Actions**，并为 Actions 开启 **Read and write permissions**。
 
 ## 数据说明
 

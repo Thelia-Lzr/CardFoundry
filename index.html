@@ -90,7 +90,7 @@
 
   <aside id="aiChatPanel" class="ai-chat-panel" aria-label="AI 助手">
     <div class="ai-chat-header">
-      <div><div class="ai-chat-title"><span class="ai-spark">✦</span> AI 桌游助手</div><div class="ai-chat-subtitle">可编辑版图、单卡、卡组与试玩数据</div></div>
+      <div><div class="ai-chat-title"><span class="ai-spark">✦</span> AI 桌游助手</div><div class="ai-chat-subtitle">可编辑版图、单卡、卡组与试玩数据 · 支持富文本</div></div>
       <div class="ai-chat-header-actions"><button class="icon-button" id="aiSettingsButton" title="API 设置">⚙</button><button class="icon-button" id="aiCloseButton" title="关闭 AI 助手">×</button></div>
     </div>
     <div id="aiContextBar" class="ai-context-bar">当前上下文：整个项目</div>
@@ -101,7 +101,7 @@
     </div>
     <div id="aiMessages" class="ai-messages"><div class="ai-message assistant"><div class="ai-message-role">AI 助手</div><div class="ai-message-content"><p>你好！我可以根据当前项目创建卡牌、整理卡组、调整版图对象，或解释试玩状态。试试说“创建一张名为迷雾预兆的事件卡”。</p></div></div></div>
     <div class="ai-tool-status" id="aiToolStatus">MCP 工具已就绪 · 本地数据不会自动上传</div>
-    <form id="aiChatForm" class="ai-composer"><textarea id="aiInput" rows="2" placeholder="描述你想修改的内容……"></textarea><div class="ai-composer-footer"><span>Enter 发送 · Shift+Enter 换行</span><button class="primary-button" type="submit" id="aiSendButton">发送 ↗</button></div></form>
+    <form id="aiChatForm" class="ai-composer"><div id="aiInput" class="ai-input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="描述你想修改的内容……"></div><div class="ai-composer-footer"><span>支持从飞书粘贴富文本 · Enter 发送 · Shift+Enter 换行</span><button class="primary-button" type="submit" id="aiSendButton">发送 ↗</button></div></form>
   </aside>
 
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
