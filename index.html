@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#10131c" />
+  <title>CardFoundry · 桌游设计器</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark">✦</div>
+        <div>
+          <div class="brand-name">CardFoundry</div>
+          <div class="brand-sub">桌游原型工作台</div>
+        </div>
+      </div>
+      <div class="project-switcher">
+        <span class="eyebrow">当前项目</span>
+        <button class="project-name" id="projectNameButton" title="新建或切换项目">晨雾边境 <span>⌄</span></button>
+      </div>
+      <nav class="main-nav" aria-label="主导航">
+        <button data-view="design" class="nav-item active"><span class="nav-icon">▦</span>桌游设计</button>
+        <button data-view="playtest" class="nav-item"><span class="nav-icon">◉</span>桌游试玩</button>
+        <button data-view="export" class="nav-item"><span class="nav-icon">↗</span>文件导出</button>
+      </nav>
+      <div class="top-actions">
+        <div class="save-state"><span class="save-dot"></span><span id="saveStatus">已保存</span></div>
+        <button class="ai-top-button" id="aiToggleButton" title="打开 AI 助手">✦ AI 助手</button>
+        <button class="icon-button" id="undoButton" title="撤销">↶</button>
+        <button class="icon-button" id="redoButton" title="重做">↷</button>
+        <button class="avatar">C</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section id="designView" class="view active-view">
+        <div class="subnav">
+          <div>
+            <span class="breadcrumb">桌游设计</span>
+            <div class="subnav-tabs">
+              <button data-design="board" class="subnav-tab active">版图设计 <span class="tab-count">1</span></button>
+              <button data-design="cards" class="subnav-tab">单卡设计 <span class="tab-count" id="cardCount">0</span></button>
+              <button data-design="decks" class="subnav-tab">卡组设计 <span class="tab-count" id="deckCount">0</span></button>
+            </div>
+          </div>
+          <div class="view-actions">
+            <button class="ghost-button" id="helpButton">? 帮助</button>
+            <button class="primary-button" id="quickPlayButton">进入试玩 <span>↗</span></button>
+          </div>
+        </div>
+        <div id="boardPage" class="design-page"></div>
+        <div id="cardsPage" class="design-page hidden"></div>
+        <div id="decksPage" class="design-page hidden"></div>
+      </section>
+
+      <section id="playtestView" class="view hidden">
+        <div class="subnav playtest-subnav">
+          <div>
+            <span class="breadcrumb">桌游试玩</span>
+            <div class="page-heading">在画布上验证你的规则</div>
+          </div>
+          <div class="view-actions">
+            <span class="session-pill"><span class="live-dot"></span>本地试玩会话</span>
+            <button class="ghost-button" id="resetPlaytestButton">重新开始</button>
+            <button class="primary-button" id="saveSessionButton">保存试玩</button>
+          </div>
+        </div>
+        <div id="playtestPage" class="playtest-layout"></div>
+      </section>
+
+      <section id="exportView" class="view hidden">
+        <div class="subnav">
+          <div>
+            <span class="breadcrumb">文件导出</span>
+            <div class="page-heading">把你的原型带走</div>
+          </div>
+          <div class="view-actions"><span class="muted-caption">所有文件只在本地处理</span></div>
+        </div>
+        <div id="exportPage" class="export-layout"></div>
+      </section>
+    </main>
+  </div>
+
+  <aside id="aiChatPanel" class="ai-chat-panel" aria-label="AI 助手">
+    <div class="ai-chat-header">
+      <div><div class="ai-chat-title"><span class="ai-spark">✦</span> AI 桌游助手</div><div class="ai-chat-subtitle">可编辑版图、单卡、卡组与试玩数据</div></div>
+      <div class="ai-chat-header-actions"><button class="icon-button" id="aiSettingsButton" title="API 设置">⚙</button><button class="icon-button" id="aiCloseButton" title="关闭 AI 助手">×</button></div>
+    </div>
+    <div id="aiContextBar" class="ai-context-bar">当前上下文：整个项目</div>
+    <div class="ai-context-toolbar" aria-label="AI 上下文管理">
+      <select id="aiContextSelect" aria-label="选择 AI 上下文"></select>
+      <button class="icon-button" id="aiNewContextButton" type="button" title="新建上下文">＋</button>
+      <button class="icon-button" id="aiDeleteContextButton" type="button" title="删除当前上下文">⌫</button>
+    </div>
+    <div id="aiMessages" class="ai-messages"><div class="ai-message assistant"><div class="ai-message-role">AI 助手</div><div class="ai-message-content"><p>你好！我可以根据当前项目创建卡牌、整理卡组、调整版图对象，或解释试玩状态。试试说“创建一张名为迷雾预兆的事件卡”。</p></div></div></div>
+    <div class="ai-tool-status" id="aiToolStatus">MCP 工具已就绪 · 本地数据不会自动上传</div>
+    <form id="aiChatForm" class="ai-composer"><textarea id="aiInput" rows="2" placeholder="描述你想修改的内容……"></textarea><div class="ai-composer-footer"><span>Enter 发送 · Shift+Enter 换行</span><button class="primary-button" type="submit" id="aiSendButton">发送 ↗</button></div></form>
+  </aside>
+
+  <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+  <div id="modalRoot"></div>
+  <input id="importFileInput" type="file" accept=".bgdesign,.json,.csv,.tsv,.xlsx" hidden />
+  <input id="assetFileInput" type="file" accept="image/*" hidden />
+  <input id="cardImportInput" type="file" accept=".xlsx,.csv,.tsv" hidden />
+  <input id="deckImportInput" type="file" accept=".xlsx,.csv,.tsv" hidden />
+  <script src="app.js"></script>
+</body>
+</html>
