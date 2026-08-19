@@ -2,6 +2,8 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const uid = (prefix) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+const PLAYTEST_CARD_WIDTH = 94;
+const PLAYTEST_CARD_HEIGHT = 132;
 
 const seedState = () => ({
   project: { id: 'project_mist', name: '晨雾边境', description: '一款关于远征、资源与未知遗迹的卡牌桌游原型。' },
@@ -27,7 +29,7 @@ const seedState = () => ({
   ],
   activeBoardId: 'board_main', activeCardId: 'card_start', activeDeckId: 'deck_event', selectedObjectId: 'obj_deck',
   designTab: 'board',
-  playtest: { currentPlayer: 1, players: [{ name: '玩家 1', color: '#d5f567', hand: [] }], decks: [], deckSourceSignature: '', tableCards: [], piles: {}, selectedPileId: '', logs: [{ time: '刚刚', text: '试玩会话已准备' }] }
+  playtest: { currentPlayer: 1, players: [{ name: '玩家 1', color: '#d5f567', hand: [] }], decks: [], deckSourceSignature: '', tableCards: [], piles: {}, selectedPileId: '', logs: [{ time: '刚刚', text: '试玩会话已准备，牌组已自动洗牌' }] }
 });
 
 let state = loadLocal() || seedState();
@@ -37,6 +39,9 @@ let undoStack = [];
 let redoStack = [];
 let projectLibrary = loadProjectLibrary();
 let activeDragEntityId = '';
+let activeDragOffset = null;
+let playtestAnimation = null;
+let playtestAnimationToken = 0;
 let aiSettings = loadAISettings();
 const AI_WELCOME_MESSAGE = '你好！我可以根据当前项目创建卡牌、整理卡组、调整版图对象，或解释试玩状态。试试说“创建一张名为迷雾预兆的事件卡”。';
 let aiContexts = {};
@@ -231,7 +236,7 @@ function createBlankProject(name, description) {
     project: { id: projectId, name, description },
     boards: [{ id: boardId, name: '基础版图', width: 930, height: 610, background: '#111620', objects: [] }],
     cards: [], tags: [], decks: [], activeBoardId: boardId, activeCardId: '', activeDeckId: '', selectedObjectId: '', designTab: 'board',
-    playtest: { currentPlayer: 1, players: [{ name: '玩家 1', color: '#d5f567', hand: [] }], decks: [], deckSourceSignature: '', tableCards: [], piles: {}, selectedPileId: '', logs: [{ time: '刚刚', text: '试玩会话已准备' }] }
+    playtest: { currentPlayer: 1, players: [{ name: '玩家 1', color: '#d5f567', hand: [] }], decks: [], deckSourceSignature: '', tableCards: [], piles: {}, selectedPileId: '', logs: [{ time: '刚刚', text: '试玩会话已准备，牌组已自动洗牌' }] }
   };
 }
 function saveState(immediate = false) {
@@ -545,11 +550,61 @@ function cardById(id) { return state.cards.find((c) => c.id === id); }
 function deckById(id) { return state.decks.find((d) => d.id === id); }
 function playtestDeckById(id) { return state.playtest.decks.find((d) => d.id === id); }
 function playtestDeckSignature() { return JSON.stringify(state.decks.map(deck => ({ id: deck.id, name: deck.name, entries: deck.entries.map(entry => ({ cardId: entry.cardId, count: Number(entry.count || 0) })) }))); }
+// The design deck stores grouped counts; a playtest copy keeps a concrete,
+// shuffled card-id queue so duplicate cards can appear in a genuinely random
+// order without ever changing the design deck.
+function expandDeckEntries(entries = []) {
+  return entries.flatMap(entry => Array.from({ length: Math.max(0, Math.floor(Number(entry.count) || 0)) }, () => entry.cardId));
+}
+function drawPileMatchesEntries(deck) {
+  if (!Array.isArray(deck?.drawPile)) return false;
+  const expected = expandDeckEntries(deck.entries).sort();
+  const actual = [...deck.drawPile].sort();
+  return expected.length === actual.length && expected.every((cardId, index) => cardId === actual[index]);
+}
+function initializePlaytestDeck(deck) {
+  const entries = deck.entries.map(entry => ({ cardId: entry.cardId, count: Math.max(0, Math.floor(Number(entry.count) || 0)) }));
+  return { id: deck.id, name: deck.name, description: deck.description, entries, drawPile: shuffleArray(expandDeckEntries(entries)) };
+}
+function ensurePlaytestDrawPile(deck) {
+  if (drawPileMatchesEntries(deck)) return false;
+  deck.drawPile = shuffleArray(expandDeckEntries(deck.entries));
+  return true;
+}
 function ensurePlaytestDecks(force = false) {
   const signature = playtestDeckSignature();
-  if (!force && state.playtest.decks.length && state.playtest.deckSourceSignature === signature) return;
-  state.playtest.decks = state.decks.map(deck => ({ id: deck.id, name: deck.name, description: deck.description, entries: deck.entries.map(entry => ({ cardId: entry.cardId, count: Number(entry.count || 0) })) }));
-  state.playtest.deckSourceSignature = signature;
+  if (force || !state.playtest.decks.length || state.playtest.deckSourceSignature !== signature) {
+    state.playtest.decks = state.decks.map(initializePlaytestDeck);
+    state.playtest.deckSourceSignature = signature;
+    return true;
+  }
+  let migrated = false;
+  state.playtest.decks.forEach(deck => { if (ensurePlaytestDrawPile(deck)) migrated = true; });
+  return migrated;
+}
+function shufflePlaytestDeck(deck) {
+  ensurePlaytestDrawPile(deck);
+  shuffleArray(deck.drawPile);
+  return deck;
+}
+function drawFromPlaytestDeck(deck) {
+  ensurePlaytestDrawPile(deck);
+  const cardId = deck.drawPile.shift();
+  if (!cardId) return '';
+  const entry = deck.entries.find(item => item.cardId === cardId && Number(item.count) > 0);
+  if (entry) entry.count = Number(entry.count) - 1;
+  return cardId;
+}
+function shuffleCardsIntoPlaytestDeck(deck, cards) {
+  ensurePlaytestDrawPile(deck);
+  cards.forEach(entity => {
+    if (!entity?.cardId) return;
+    deck.drawPile.push(entity.cardId);
+    const entry = deck.entries.find(item => item.cardId === entity.cardId);
+    if (entry) entry.count = Number(entry.count || 0) + 1;
+    else deck.entries.push({ cardId: entity.cardId, count: 1 });
+  });
+  shufflePlaytestDeck(deck);
 }
 function objectLabel(type) { return ({ 'card-slot': '卡牌放置格', 'card-zone': '卡牌放置区', 'deck-zone': '卡组放置区', stack: '卡堆' })[type] || type; }
 function objectColor(type) { return ({ 'card-slot': 'blue', 'card-zone': 'green', 'deck-zone': 'purple', stack: 'orange' })[type] || 'blue'; }
@@ -790,10 +845,10 @@ function executeMCPTool(name, args = {}) {
     else if (name === 'set_playtest_card_orientation') { const card = state.playtest.tableCards.find(item => item.id === args.entityId); if (!card) throw new Error('找不到试玩卡牌'); card.tapped = Boolean(args.tapped); result = card; }
     else if (name === 'return_playtest_card_to_hand') { const card = state.playtest.tableCards.find(item => item.id === args.entityId); if (!card) throw new Error('找不到试玩卡牌'); state.playtest.tableCards = state.playtest.tableCards.filter(item => item.id !== args.entityId); state.playtest.players[0].hand.push({ id: card.id, cardId: card.cardId, name: card.name }); result = { returned: card.name }; }
     else if (name === 'put_playtest_card_in_pile') { const pile = currentBoard().objects.find(item => item.id === args.pileId && item.type === 'stack'); if (!pile) throw new Error('找不到卡堆'); let index = state.playtest.tableCards.findIndex(item => item.id === args.entityId); let card; if (index >= 0) [card] = state.playtest.tableCards.splice(index, 1); else { index = state.playtest.players[0].hand.findIndex(item => item.id === args.entityId); if (index >= 0) [card] = state.playtest.players[0].hand.splice(index, 1); } if (!card) throw new Error('找不到试玩卡牌'); delete card.x; delete card.y; delete card.objectId; delete card.tapped; state.playtest.piles[pile.id] ||= []; state.playtest.piles[pile.id].push(card); result = { pileId: pile.id, count: state.playtest.piles[pile.id].length }; }
-    else if (name === 'shuffle_playtest_pile_into') { const source = currentBoard().objects.find(item => item.id === args.sourcePileId && item.type === 'stack'); const target = currentBoard().objects.find(item => item.id === args.targetObjectId && (item.type === 'stack' || item.type === 'deck-zone')); if (!source || !target) throw new Error('找不到源卡堆或目标牌堆'); const cards = shuffleArray((state.playtest.piles[source.id] || []).splice(0)); if (target.type === 'stack') { state.playtest.piles[target.id] ||= []; state.playtest.piles[target.id].push(...cards); } else { const deck = playtestDeckById(target.deckId); if (!deck) throw new Error('目标抽卡堆没有试玩副本'); cards.forEach(card => { const entry = deck.entries.find(item => item.cardId === card.cardId); if (entry) entry.count += 1; else deck.entries.push({ cardId: card.cardId, count: 1 }); }); } result = { moved: cards.length, targetObjectId: target.id }; }
-    else if (name === 'draw_playtest_card') { ensurePlaytestDecks(); const deck = playtestDeckById(args.deckId); const entry = deck?.entries.find(item => Number(item.count) > 0); if (!deck || !entry) throw new Error('试玩卡组为空或不存在'); entry.count -= 1; const card = cardById(entry.cardId); state.playtest.players[0].hand.push({ id: uid('entity'), cardId: card?.id, name: card?.name || '缺失卡牌' }); result = { card: card?.name, remaining: deckCardCount(deck) }; }
-    else if (name === 'shuffle_playtest_deck') { ensurePlaytestDecks(); const deck = playtestDeckById(args.deckId); if (!deck) throw new Error('找不到试玩卡组'); deck.entries = shuffleArray(deck.entries); result = { deckId: deck.id, count: deckCardCount(deck) }; }
-    else if (name === 'reset_playtest') { state.playtest.players[0].hand = []; state.playtest.tableCards = []; state.playtest.piles = {}; state.playtest.selectedPileId = ''; state.playtest.decks = []; state.playtest.deckSourceSignature = ''; ensurePlaytestDecks(true); state.playtest.logs = [{ time: '刚刚', text: 'AI 已重新开始试玩会话' }]; result = { reset: true, decks: state.playtest.decks.map(deck => ({ id: deck.id, count: deckCardCount(deck) })) }; }
+    else if (name === 'shuffle_playtest_pile_into') { const source = currentBoard().objects.find(item => item.id === args.sourcePileId && item.type === 'stack'); const target = currentBoard().objects.find(item => item.id === args.targetObjectId && (item.type === 'stack' || item.type === 'deck-zone')); if (!source || !target) throw new Error('找不到源卡堆或目标牌堆'); const cards = shuffleArray((state.playtest.piles[source.id] || []).splice(0)); if (target.type === 'stack') { state.playtest.piles[target.id] ||= []; state.playtest.piles[target.id].push(...cards); } else { const deck = playtestDeckById(target.deckId); if (!deck) throw new Error('目标抽卡堆没有试玩副本'); shuffleCardsIntoPlaytestDeck(deck, cards); } triggerPlaytestAnimation('shuffle', { objectIds: [source.id, target.id] }); result = { moved: cards.length, targetObjectId: target.id }; }
+    else if (name === 'draw_playtest_card') { ensurePlaytestDecks(); const deck = playtestDeckById(args.deckId); if (!deck) throw new Error('试玩卡组不存在'); const cardId = drawFromPlaytestDeck(deck); if (!cardId) throw new Error('试玩卡组为空'); const card = cardById(cardId); const entityId = uid('entity'); state.playtest.players[0].hand.push({ id: entityId, cardId, name: card?.name || '缺失卡牌' }); triggerPlaytestAnimation('draw', { entityId, objectIds: currentBoard().objects.filter(object => object.type === 'deck-zone' && object.deckId === deck.id).map(object => object.id) }); result = { card: card?.name, remaining: deckCardCount(deck) }; }
+    else if (name === 'shuffle_playtest_deck') { ensurePlaytestDecks(); const deck = playtestDeckById(args.deckId); if (!deck) throw new Error('找不到试玩卡组'); shufflePlaytestDeck(deck); triggerPlaytestAnimation('shuffle', { objectIds: currentBoard().objects.filter(object => object.type === 'deck-zone' && object.deckId === deck.id).map(object => object.id) }); result = { deckId: deck.id, count: deckCardCount(deck) }; }
+    else if (name === 'reset_playtest') { state.playtest.players[0].hand = []; state.playtest.tableCards = []; state.playtest.piles = {}; state.playtest.selectedPileId = ''; state.playtest.decks = []; state.playtest.deckSourceSignature = ''; ensurePlaytestDecks(true); state.playtest.logs = [{ time: '刚刚', text: 'AI 已重新开始试玩会话，牌组已自动洗牌' }]; result = { reset: true, decks: state.playtest.decks.map(deck => ({ id: deck.id, count: deckCardCount(deck) })) }; }
     else throw new Error(`不支持的工具：${name}`);
   };
   if (name === 'get_project_state') result = projectAIContext();
@@ -914,26 +969,55 @@ window.cardFoundryMCP = {
 function renderPlaytest() {
   const board = currentBoard(); const p = state.playtest;
   const player = p.players[0];
-  $('#playtestPage').innerHTML = `<section class="play-board"><div class="board-canvas-wrap"><div class="board-canvas" id="playCanvas"><span class="canvas-label">PLAYTEST / ${esc(board.name).toUpperCase()}</span>${board.objects.map(renderPlayObject).join('')}${(p.tableCards || []).map(renderPlayedCard).join('')}</div></div></section><aside class="card-panel playtest-side"><div class="side-tabs"><button class="side-tab active" data-side-tab="object">当前对象</button><button class="side-tab" data-side-tab="deck">牌组</button><button class="side-tab" data-side-tab="log">游戏日志</button></div><div class="side-content" id="playSideContent">${renderPlaySide('object')}</div></aside><aside class="card-panel player-panel" id="playerHandDropPanel" data-hand-player="1"><div class="panel-heading"><span class="panel-title">玩家与资源</span><span class="tab-count">单人试玩</span></div><div class="player-block"><div class="player-title"><span class="player-color" style="background:${player.color}"></span>${esc(player.name)} <span class="tab-count">行动中</span></div><div class="player-meta">手牌 ${player.hand.length} 张 · 场上 ${(p.tableCards || []).filter(card => card.player === 1).length} 张</div></div><div class="hand-title">玩家 1 手牌 · 可拖回此处</div><div class="hand-cards" id="activeHandDropZone" data-hand-player="1">${player.hand.map(renderHandCard).join('') || '<span class="muted-caption">抽牌后会显示在这里；也可将场上的牌拖回</span>'}</div></aside>`;
+  $('#playtestPage').innerHTML = `<section class="play-board"><div class="board-canvas-wrap"><div class="board-canvas" id="playCanvas"><span class="canvas-label">PLAYTEST / ${esc(board.name).toUpperCase()}</span>${board.objects.map(renderPlayObject).join('')}${(p.tableCards || []).map(renderPlayedCard).join('')}</div></div></section><aside class="card-panel playtest-side"><div class="side-tabs"><button class="side-tab active" data-side-tab="object">当前对象</button><button class="side-tab" data-side-tab="deck">牌组</button><button class="side-tab" data-side-tab="log">游戏日志</button></div><div class="side-content" id="playSideContent">${renderPlaySide('object')}</div></aside><aside class="card-panel player-panel" id="playerHandDropPanel" data-hand-player="1"><div class="hand-panel-heading"><div><span class="panel-title">手牌</span><span class="hand-count">${player.hand.length} 张</span></div><span class="hand-drop-hint">将场上的牌拖回此处</span></div><div class="hand-cards" id="activeHandDropZone" data-hand-player="1">${player.hand.map(renderHandCard).join('') || '<span class="hand-empty-state">抽牌后会显示在这里，也可将场上的牌拖回</span>'}</div></aside>`;
   bindPlaytestEvents();
 }
 function renderHandCard(entity) {
   const card = cardById(entity.cardId);
-  return `<div class="hand-card" draggable="true" tabindex="0" data-play-card="${entity.id}" data-preview-card="${card?.id || ''}" title="拖到版图上出牌"><div class="hand-card-name">${esc(card?.name || entity.name)}</div><div class="hand-card-art">${esc(card?.art || '✦')}</div><div class="hand-card-effect">${card?.effect || ''}</div></div>`;
+  const animationClass = playtestAnimation?.entityId === entity.id ? 'playtest-card-arrive' : '';
+  return `<div class="hand-card ${animationClass}" draggable="true" tabindex="0" data-play-card="${entity.id}" data-preview-card="${card?.id || ''}" title="拖到版图上出牌">${renderPlayCardFace(card, entity)}</div>`;
+}
+function renderPlayCardFace(card, entity = {}) {
+  const name = card?.name || entity.name || '缺失卡牌';
+  return `<div class="play-card-face"><div class="play-card-name">${esc(name)}</div><div class="play-card-art">${esc(card?.art || '✦')}</div><div class="play-card-effect">${card?.effect || '<span style="opacity:.58">暂无卡牌效果</span>'}</div></div>`;
 }
 function renderPlayObject(o) {
   const boundCard = o.cardId ? cardById(o.cardId) : null; const boundDeck = o.deckId ? playtestDeckById(o.deckId) : null;
   const pileCount = o.type === 'stack' ? (state.playtest.piles[o.id] || []).length : 0;
   const selected = o.type === 'stack' && state.playtest.selectedPileId === o.id;
-  return `<div class="board-object ${objectColor(o.type)} ${selected ? 'selected-pile' : ''}" style="left:${o.x}px;top:${o.y}px;width:${o.width}px;height:${o.height}px;${o.background ? `background:${esc(o.background)};` : ''}" data-play-object="${o.id}" ${boundCard ? `data-preview-card="${boundCard.id}"` : ''}><span class="object-symbol">${objectSymbol(o.type)}</span>${o.showName !== false ? `<span class="object-name">${esc(o.name)}</span>` : ''}${o.type === 'stack' ? `<small>${pileCount} 张牌 · 点击选择</small>` : boundCard ? `<small>${esc(boundCard.name)}</small>` : boundDeck ? `<small>${esc(boundDeck.name)} · ${deckCardCount(boundDeck)}</small>` : ''}</div>`;
+  const isDrawZone = o.type === 'deck-zone';
+  const animationClass = playtestAnimation?.type === 'draw' && playtestAnimation.objectIds?.includes(o.id)
+    ? 'playtest-draw-feedback'
+    : playtestAnimation?.type === 'shuffle' && playtestAnimation.objectIds?.includes(o.id)
+      ? 'playtest-shuffle-feedback'
+      : '';
+  const drawZoneAttributes = isDrawZone ? 'role="button" tabindex="0" aria-label="点击以抽牌" title="点击以抽牌"' : '';
+  const objectDetail = o.type === 'stack'
+    ? `<small>${pileCount} 张牌 · 点击选择</small>`
+    : boundCard
+      ? `<small>${esc(boundCard.name)}</small>`
+      : boundDeck
+        ? `<small>${esc(boundDeck.name)} · ${deckCardCount(boundDeck)} 张</small>`
+        : '';
+  const drawHint = isDrawZone ? `<span class="draw-zone-hint">${boundDeck ? '点击以抽牌' : '请先绑定卡组'}</span>` : '';
+  return `<div class="board-object ${objectColor(o.type)} ${selected ? 'selected-pile' : ''} ${isDrawZone ? 'draw-zone' : ''} ${animationClass}" style="left:${o.x}px;top:${o.y}px;width:${o.width}px;height:${o.height}px;${o.background ? `background:${esc(o.background)};` : ''}" data-play-object="${o.id}" ${drawZoneAttributes} ${boundCard ? `data-preview-card="${boundCard.id}"` : ''}><span class="object-symbol">${objectSymbol(o.type)}</span>${o.showName !== false ? `<span class="object-name">${esc(o.name)}</span>` : ''}${objectDetail}${drawHint}</div>`;
 }
 function renderPlayedCard(entity) {
   const card = cardById(entity.cardId);
-  return `<div class="played-card ${entity.tapped ? 'tapped' : ''}" draggable="true" data-table-card="${entity.id}" data-preview-card="${card?.id || ''}" tabindex="0" title="拖动卡牌；右键横置/竖置" style="left:${Number(entity.x || 560)}px;top:${Number(entity.y || 160)}px">${esc(card?.name || entity.name || '缺失卡牌')}</div>`;
+  const x = Number.isFinite(Number(entity.x)) ? Number(entity.x) : 560;
+  const y = Number.isFinite(Number(entity.y)) ? Number(entity.y) : 160;
+  return `<div class="played-card ${entity.tapped ? 'tapped' : ''}" draggable="true" data-table-card="${entity.id}" data-preview-card="${card?.id || ''}" tabindex="0" title="拖动卡牌；右键横置/竖置" style="left:${x}px;top:${y}px">${renderPlayCardFace(card, entity)}</div>`;
+}
+function triggerPlaytestAnimation(type, options = {}) {
+  const token = ++playtestAnimationToken;
+  playtestAnimation = { type, ...options };
+  window.setTimeout(() => {
+    if (token === playtestAnimationToken) playtestAnimation = null;
+  }, 560);
 }
 function deckCardCount(deck) { return deck?.entries?.reduce((sum, entry) => sum + Number(entry.count || 0), 0) || 0; }
 function renderPlaySide(tab) {
-  if (tab === 'deck') return `<div class="section-label">试玩卡组副本</div><p class="muted-caption" style="line-height:1.5">试玩中的抽牌和洗牌不会修改设计页卡组。</p>${state.playtest.decks.map(d => `<div class="log-item"><strong>${esc(d.name)}</strong><br><span class="muted-caption">${deckCardCount(d)} 张 · 点击抽牌</span><br><button class="ghost-button draw-button" data-draw-deck="${d.id}" style="margin-top:7px">抽一张</button><button class="ghost-button" data-shuffle-deck="${d.id}" style="margin:7px 0 0 5px">洗牌</button></div>`).join('')}`;
+  if (tab === 'deck') return `<div class="section-label">试玩卡组副本</div><p class="muted-caption" style="line-height:1.5">进入试玩时会自动洗牌；试玩中的抽牌和洗牌不会修改设计页卡组。</p>${state.playtest.decks.map(d => `<div class="log-item"><strong>${esc(d.name)}</strong><br><span class="muted-caption">${deckCardCount(d)} 张 · 点击抽牌</span><br><button class="ghost-button draw-button" data-draw-deck="${d.id}" style="margin-top:7px">抽一张</button><button class="ghost-button" data-shuffle-deck="${d.id}" style="margin:7px 0 0 5px">洗牌</button></div>`).join('')}`;
   if (tab === 'log') return `<div class="section-label">操作记录</div>${state.playtest.logs.map(log => `<div class="log-item"><span class="log-time">${esc(log.time)}</span>${esc(log.text)}</div>`).join('')}`;
   if (state.playtest.selectedPileId) return renderSelectedPilePanel(state.playtest.selectedPileId);
   return `<div class="section-label">试玩操作</div><p class="muted-caption" style="line-height:1.6">点击版图中的抽卡堆抽牌。点击卡堆可管理其中的牌；右键场上卡牌可横置或竖置。</p>`;
@@ -953,12 +1037,20 @@ function renderPlayCardPreview(card) {
 function bindPlaytestEvents() {
   $$('[data-side-tab]').forEach(el => el.addEventListener('click', () => { $$('[data-side-tab]').forEach(x => x.classList.remove('active')); el.classList.add('active'); $('#playSideContent').innerHTML = renderPlaySide(el.dataset.sideTab); bindSideActions(); }));
   bindSideActions();
-  $$('[data-play-object]').forEach(el => el.addEventListener('click', () => {
+  const activatePlayObject = el => {
     const o = currentBoard().objects.find(x => x.id === el.dataset.playObject);
     if (o?.type === 'deck-zone') drawCard(o.deckId);
     else if (o?.type === 'stack') selectPile(o.id);
     else toast(`${o?.name || '区域'}：可拖入或查看卡牌`);
-  }));
+  };
+  $$('[data-play-object]').forEach(el => {
+    el.addEventListener('click', () => activatePlayObject(el));
+    if (el.classList.contains('draw-zone')) el.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      activatePlayObject(el);
+    });
+  });
   bindPlayCardDragEvents();
   bindPlayCardPreviewEvents();
 }
@@ -997,24 +1089,23 @@ function bindPlayCardDragEvents() {
     element.addEventListener('drop', event => {
       event.preventDefault(); event.stopPropagation(); element.classList.remove('play-canvas-drop-target');
       const entityId = getEntityId(event); if (!entityId) return;
-      const rect = canvas.getBoundingClientRect(); const scale = rect.width / currentBoard().width;
-      const x = Math.max(5, Math.min(currentBoard().width - 75, (event.clientX - rect.left) / scale - 34));
-      const y = Math.max(5, Math.min(currentBoard().height - 102, (event.clientY - rect.top) / scale - 47));
+      const point = clientPointToPlayCanvas(event.clientX, event.clientY, canvas.getBoundingClientRect(), currentBoard());
+      const position = playtestCardDropPosition(point, activeDragOffset, currentBoard());
       const targetObject = currentBoard().objects.find(object => object.id === objectId);
       if (targetObject?.type === 'stack') putCardInPile(entityId, targetObject.id, isTableCard(entityId));
-      else if (isTableCard(entityId)) moveTableCard(entityId, x, y, objectId);
-      else placeCardOnTable(entityId, x, y, objectId);
+      else if (isTableCard(entityId)) moveTableCard(entityId, position.x, position.y, objectId);
+      else placeCardOnTable(entityId, position.x, position.y, objectId);
     });
   };
   addDropTarget(canvas);
   $$('[data-play-object]', canvas).forEach(element => addDropTarget(element, element.dataset.playObject));
   $$('[data-play-card]').forEach(element => {
-    element.addEventListener('dragstart', event => { activeDragEntityId = element.dataset.playCard; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); element.classList.add('dragging'); });
-    element.addEventListener('dragend', () => { activeDragEntityId = ''; element.classList.remove('dragging'); });
+    element.addEventListener('dragstart', event => { activeDragEntityId = element.dataset.playCard; activeDragOffset = handCardDragOffset(event, element); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); element.classList.add('dragging'); });
+    element.addEventListener('dragend', () => { activeDragEntityId = ''; activeDragOffset = null; element.classList.remove('dragging'); });
   });
   $$('[data-table-card]').forEach(element => {
-    element.addEventListener('dragstart', event => { activeDragEntityId = element.dataset.tableCard; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); element.classList.add('dragging'); });
-    element.addEventListener('dragend', () => { activeDragEntityId = ''; element.classList.remove('dragging'); });
+    element.addEventListener('dragstart', event => { const entity = state.playtest.tableCards.find(card => card.id === element.dataset.tableCard); activeDragEntityId = element.dataset.tableCard; activeDragOffset = tableCardDragOffset(event, entity, canvas); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); element.classList.add('dragging'); });
+    element.addEventListener('dragend', () => { activeDragEntityId = ''; activeDragOffset = null; element.classList.remove('dragging'); });
     element.addEventListener('contextmenu', event => { event.preventDefault(); toggleTableCardTapped(element.dataset.tableCard); });
   });
   const handZone = $('#activeHandDropZone');
@@ -1038,6 +1129,32 @@ function bindPlayCardDragEvents() {
       if (isTableCard(entityId)) returnCardToHand(entityId, 1);
     });
   });
+}
+function clientPointToPlayCanvas(clientX, clientY, rect, board) {
+  const scaleX = rect.width / board.width || 1;
+  const scaleY = rect.height / board.height || scaleX;
+  return { x: (clientX - rect.left) / scaleX, y: (clientY - rect.top) / scaleY };
+}
+function playtestCardDropPosition(point, offset, board) {
+  const grab = offset || { x: PLAYTEST_CARD_WIDTH / 2, y: PLAYTEST_CARD_HEIGHT / 2 };
+  return {
+    x: Math.max(0, Math.min(board.width - PLAYTEST_CARD_WIDTH, point.x - grab.x)),
+    y: Math.max(0, Math.min(board.height - PLAYTEST_CARD_HEIGHT, point.y - grab.y))
+  };
+}
+function handCardDragOffset(event, element) {
+  const rect = element.getBoundingClientRect();
+  const pointerX = event.clientX >= rect.left && event.clientX <= rect.right ? event.clientX : rect.left + rect.width / 2;
+  const pointerY = event.clientY >= rect.top && event.clientY <= rect.bottom ? event.clientY : rect.top + rect.height / 2;
+  return {
+    x: ((pointerX - rect.left) / rect.width) * PLAYTEST_CARD_WIDTH,
+    y: ((pointerY - rect.top) / rect.height) * PLAYTEST_CARD_HEIGHT
+  };
+}
+function tableCardDragOffset(event, entity, canvas) {
+  if (!entity) return { x: PLAYTEST_CARD_WIDTH / 2, y: PLAYTEST_CARD_HEIGHT / 2 };
+  const point = clientPointToPlayCanvas(event.clientX, event.clientY, canvas.getBoundingClientRect(), currentBoard());
+  return { x: point.x - Number(entity.x || 0), y: point.y - Number(entity.y || 0) };
 }
 function putCardInPile(entityId, pileId, fromTable) {
   const pile = currentBoard().objects.find(object => object.id === pileId && object.type === 'stack');
@@ -1110,7 +1227,7 @@ function returnCardToHand(entityId, playerNumber) {
 }
 function bindSideActions() {
   $$('[data-draw-deck]').forEach(el => el.addEventListener('click', () => drawCard(el.dataset.drawDeck)));
-  $$('[data-shuffle-deck]').forEach(el => el.addEventListener('click', () => toast('牌组已洗牌', 'success')));
+  $$('[data-shuffle-deck]').forEach(el => el.addEventListener('click', () => shuffleCardDeck(el.dataset.shuffleDeck)));
   $('#closePileButton')?.addEventListener('click', () => { state.playtest.selectedPileId = ''; renderPlaytest(); });
   $('#shufflePileButton')?.addEventListener('click', () => shufflePileIntoTarget(state.playtest.selectedPileId, $('#pileTargetSelect')?.value));
 }
@@ -1127,14 +1244,11 @@ function shufflePileIntoTarget(sourceId, targetId) {
       state.playtest.piles[target.id].push(...shuffled);
     } else {
       const deck = playtestDeckById(target.deckId);
-      if (deck) shuffled.forEach(entity => {
-        const entry = deck.entries.find(item => item.cardId === entity.cardId);
-        if (entry) entry.count = Number(entry.count || 0) + 1;
-        else deck.entries.push({ cardId: entity.cardId, count: 1 });
-      });
+      if (deck) shuffleCardsIntoPlaytestDeck(deck, shuffled);
     }
     state.playtest.logs.unshift({ time: '刚刚', text: `${source.name}的 ${count} 张牌已洗入${target.name}` });
     state.playtest.selectedPileId = '';
+    triggerPlaytestAnimation('shuffle', { objectIds: [source.id, target.id] });
   });
   renderPlaytest(); toast(`${count} 张牌已洗入「${target.name}」`, 'success');
 }
@@ -1147,8 +1261,30 @@ function shuffleArray(items) {
 }
 function drawCard(deckId) {
   const deck = playtestDeckById(deckId); if (!deck) return toast('没有找到这个试玩卡组');
-  const entry = deck.entries.find(e => Number(e.count) > 0); if (!entry) return toast('牌组已空');
-  const card = cardById(entry.cardId); mutate(() => { entry.count = Number(entry.count) - 1; state.playtest.players[state.playtest.currentPlayer - 1].hand.push({ id: uid('entity'), cardId: card?.id, name: card?.name || '缺失卡牌' }); state.playtest.logs.unshift({ time: '刚刚', text: `玩家${state.playtest.currentPlayer} 从${deck.name}抽取了“${card?.name || '缺失卡牌'}”` }); }); renderPlaytest(); toast(`已抽取「${card?.name || '缺失卡牌'}」`, 'success'); }
+  let cardId = '';
+  let entityId = '';
+  mutate(() => {
+    cardId = drawFromPlaytestDeck(deck);
+    if (!cardId) return;
+    const card = cardById(cardId);
+    entityId = uid('entity');
+    state.playtest.players[state.playtest.currentPlayer - 1].hand.push({ id: entityId, cardId, name: card?.name || '缺失卡牌' });
+    state.playtest.logs.unshift({ time: '刚刚', text: `玩家${state.playtest.currentPlayer} 从${deck.name}抽取了“${card?.name || '缺失卡牌'}”` });
+  });
+  if (!cardId) return toast('牌组已空');
+  const card = cardById(cardId);
+  const drawZoneIds = currentBoard().objects.filter(object => object.type === 'deck-zone' && object.deckId === deck.id).map(object => object.id);
+  triggerPlaytestAnimation('draw', { entityId, objectIds: drawZoneIds });
+  renderPlaytest(); toast(`已抽取「${card?.name || '缺失卡牌'}」`, 'success'); }
+function shuffleCardDeck(deckId) {
+  const deck = playtestDeckById(deckId); if (!deck) return toast('没有找到这个试玩卡组');
+  mutate(() => {
+    shufflePlaytestDeck(deck);
+    state.playtest.logs.unshift({ time: '刚刚', text: `${deck.name}已重新洗牌` });
+    triggerPlaytestAnimation('shuffle', { objectIds: currentBoard().objects.filter(object => object.type === 'deck-zone' && object.deckId === deck.id).map(object => object.id) });
+  });
+  renderPlaytest(); toast(`「${deck.name}」已洗牌`, 'success');
+}
 
 function renderExport() {
   const totalCards = state.decks.reduce((sum, d) => sum + d.entries.reduce((s,e)=>s+Number(e.count||0),0), 0);
@@ -1223,7 +1359,7 @@ function bindGlobal() {
   $('#aiInput').addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#aiChatForm').requestSubmit(); } });
   $('#projectNameButton').onclick = openNewProjectModal;
   $('#helpButton').onclick = () => { $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal"><button class="modal-close" id="closeModal">×</button><h3>CardFoundry 快速指南</h3><p>从左侧对象库添加版图区域；在单卡设计中粘贴飞书富文本；用卡组页设置牌数；最后进入试玩验证抽牌和弃牌。所有内容自动保存在当前浏览器。</p><div class="modal-actions"><button class="primary-button" id="cancelModal">知道了</button></div></div></div>`; $('#closeModal').onclick = closeModal; $('#cancelModal').onclick = closeModal; };
-  $('#resetPlaytestButton').onclick = () => { mutate(() => { ensurePlaytestDecks(true); state.playtest.players.forEach(p => p.hand = []); state.playtest.tableCards = []; state.playtest.piles = {}; state.playtest.selectedPileId = ''; state.playtest.logs = [{ time: '刚刚', text: '试玩会话已重新开始' }]; }); renderPlaytest(); toast('试玩已重新开始，已重置卡组副本', 'success'); };
+  $('#resetPlaytestButton').onclick = () => { mutate(() => { ensurePlaytestDecks(true); state.playtest.players.forEach(p => p.hand = []); state.playtest.tableCards = []; state.playtest.piles = {}; state.playtest.selectedPileId = ''; state.playtest.logs = [{ time: '刚刚', text: '试玩会话已重新开始，牌组已自动洗牌' }]; }); renderPlaytest(); toast('试玩已重新开始，已洗牌并重置卡组副本', 'success'); };
   $('#saveSessionButton').onclick = () => { saveState(true); toast('试玩状态已保存', 'success'); };
   $('#importFileInput').addEventListener('change', async e => { const file = e.target.files[0]; if (!file) return; try { const imported = JSON.parse(await file.text()); if (!imported.cards || !imported.boards) throw new Error(); state = { ...seedState(), ...imported }; renderAll(); saveState(true); toast('设计文件导入成功', 'success'); } catch { toast('文件格式无效，导入失败'); } e.target.value = ''; });
   $('#cardImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'cards'); e.target.value = ''; }); $('#deckImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'deck'); e.target.value = ''; });
