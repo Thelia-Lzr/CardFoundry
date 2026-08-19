@@ -43,6 +43,10 @@ let activeDragOffset = null;
 let playtestAnimation = null;
 let playtestAnimationToken = 0;
 let cardEffectSelection = null;
+const CARD_EFFECT_COLOR_PRESETS = {
+  foreColor: ['#f2f4f4', '#b9c2c2', '#ff6b6b', '#ff9f43', '#ffd93d', '#6bcb77', '#4d96ff', '#845ef7', '#f06595', '#1f2328'],
+  hiliteColor: ['#fff1a8', '#ffd8a8', '#ffc9c9', '#d3f9d8', '#b2f2bb', '#a5d8ff', '#d0bfff', '#eebefa', '#dee2e6', '#495057']
+};
 let aiSettings = loadAISettings();
 const AI_WELCOME_MESSAGE = '你好！我可以根据当前项目创建卡牌、整理卡组、调整版图对象，或解释试玩状态。试试说“创建一张名为迷雾预兆的事件卡”。';
 let aiContexts = {};
@@ -223,7 +227,7 @@ function normalizeState() {
   const existingCardTags = state.cards.map(card => card.tag).filter(tag => tag && tag !== '未分类');
   state.tags = [...new Set([...(Array.isArray(state.tags) ? state.tags : []), ...existingCardTags])];
   state.decks = Array.isArray(state.decks) ? state.decks : [];
-  state.decks.forEach(deck => { deck.entries = Array.isArray(deck.entries) ? deck.entries : []; deck.description = deck.description || ''; });
+  state.decks.forEach(deck => { deck.entries = Array.isArray(deck.entries) ? deck.entries : []; deck.entries.forEach(entry => { entry.count = Math.max(0, Math.floor(Number(entry.count) || 0)); }); deck.description = deck.description || ''; });
   state.boards.forEach(board => { board.objects = Array.isArray(board.objects) ? board.objects : []; board.objects.forEach(object => { object.showName = object.showName !== false; object.showCount = object.showCount !== false; object.gap = Number(object.gap || 10); object.stackMode = object.stackMode || '顶牌'; if (object.type === 'programmable-zone') object.program = normalizeProgram(object.program); }); });
   const savedPlayers = Array.isArray(state.playtest.players) ? state.playtest.players : [];
   state.playtest.players = savedPlayers.length ? [{ ...seed.playtest.players[0], ...savedPlayers[0], name: savedPlayers[0].name || '玩家 1' }] : seed.playtest.players;
@@ -791,7 +795,13 @@ function renderCards() {
 }
 function renderCardForm(c) {
   const effectHTML = sanitizeCardEffectHTML(c.effect || '');
-  return `<div class="editor-title-row"><div><div class="editor-kicker">CARD / ${esc(c.number || 'NEW')}</div><div class="editor-title">编辑单卡</div></div><button class="danger-button" id="deleteCardButton">删除</button></div><div class="field"><label>卡名</label><input id="cardNameInput" value="${esc(c.name)}" placeholder="例如：余烬火花"></div><div class="field"><label>卡牌效果</label><div class="rich-toolbar" role="toolbar" aria-label="卡牌效果格式"><button type="button" class="rich-tool" data-command="bold" title="粗体"><strong>B</strong></button><button type="button" class="rich-tool" data-command="italic" title="斜体"><em>I</em></button><button type="button" class="rich-tool" data-command="underline" title="下划线"><u>U</u></button><span class="rich-toolbar-divider"></span><button type="button" class="rich-tool" data-command="foreColor" data-value="#d5f567" title="文字颜色">A</button><button type="button" class="rich-tool" data-command="hiliteColor" data-value="#fff1a8" title="文字底色"><span class="highlight-tool">A</span></button><span class="rich-toolbar-divider"></span><button type="button" class="rich-tool" data-command="justifyLeft" title="左对齐">≡</button><button type="button" class="rich-tool" data-command="justifyCenter" title="居中">≡</button><button type="button" class="rich-tool" data-command="insertUnorderedList" title="项目列表">☷</button><button type="button" class="rich-tool" data-command="insertOrderedList" title="编号列表">1.</button><button type="button" class="rich-tool" data-command="removeFormat" title="清除格式">清</button></div><div class="rich-editor" id="cardEffectEditor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-placeholder="输入卡牌效果……">${effectHTML}</div><div class="editor-note">支持从飞书粘贴文字、颜色、底色、粗体、斜体、下划线、列表和段落。</div></div>`;
+  return `<div class="editor-title-row"><div><div class="editor-kicker">CARD / ${esc(c.number || 'NEW')}</div><div class="editor-title">编辑单卡</div></div><button class="danger-button" id="deleteCardButton">删除</button></div><div class="field"><label>卡名</label><input id="cardNameInput" value="${esc(c.name)}" placeholder="例如：余烬火花"></div><div class="field"><label>卡牌效果</label><div class="rich-toolbar" role="toolbar" aria-label="卡牌效果格式"><button type="button" class="rich-tool" data-command="bold" title="粗体"><strong>B</strong></button><button type="button" class="rich-tool" data-command="italic" title="斜体"><em>I</em></button><button type="button" class="rich-tool" data-command="underline" title="下划线"><u>U</u></button><span class="rich-toolbar-divider"></span>${renderRichColorControl('foreColor', '文字颜色')}${renderRichColorControl('hiliteColor', '高光颜色')}<span class="rich-toolbar-divider"></span><button type="button" class="rich-tool" data-command="justifyLeft" title="左对齐">≡</button><button type="button" class="rich-tool" data-command="justifyCenter" title="居中">≡</button><button type="button" class="rich-tool" data-command="insertUnorderedList" title="项目列表">☷</button><button type="button" class="rich-tool" data-command="insertOrderedList" title="编号列表">1.</button><button type="button" class="rich-tool" data-command="removeFormat" title="清除格式">清</button></div><div class="rich-editor" id="cardEffectEditor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-placeholder="输入卡牌效果……">${effectHTML}</div><div class="editor-note">支持从飞书粘贴富文本；文字颜色和高光均可添加、更换或单独取消。</div></div>`;
+}
+function renderRichColorControl(command, label) {
+  const isHighlight = command === 'hiliteColor';
+  const initialColor = isHighlight ? '#fff1a8' : '#f2f4f4';
+  const clearLabel = isHighlight ? '无高光' : '自动颜色';
+  return `<div class="rich-color-control" data-color-control="${command}"><button type="button" class="rich-tool rich-color-trigger" data-color-trigger="${command}" title="${label}" aria-label="${label}" aria-haspopup="true" aria-expanded="false"><span class="rich-color-glyph ${isHighlight ? 'is-highlight' : ''}">A</span><span class="rich-color-indicator" data-color-indicator style="--rich-tool-color:${initialColor}"></span><span class="rich-color-chevron">⌄</span></button><div class="rich-color-popover" data-color-popover="${command}" role="dialog" aria-label="选择${label}" hidden><div class="rich-color-popover-title">${label}</div><button type="button" class="rich-color-clear" data-color-clear="${command}"><span class="rich-color-none" aria-hidden="true"></span>${clearLabel}</button><div class="rich-color-grid">${CARD_EFFECT_COLOR_PRESETS[command].map(color => `<button type="button" class="rich-color-swatch" data-color-command="${command}" data-color-value="${color}" style="--swatch-color:${color}" title="${color}" aria-label="${label} ${color}"></button>`).join('')}</div><label class="rich-custom-color"><span>自定义颜色</span><span class="rich-custom-color-value" data-custom-color-value>${initialColor.toUpperCase()}</span><input type="color" data-custom-color="${command}" value="${initialColor}" aria-label="自定义${label}"></label></div></div>`;
 }
 function renderCardPreview(c) {
   const scale = Math.max(.72, Math.min(1.22, Number(c.width || 63) / 63));
@@ -844,8 +854,10 @@ function bindCardEvents() {
     syncEffect();
     updateRichToolbarState(effectEditor);
   }));
+  bindRichColorControls(effectEditor, syncEffect);
   effectEditor?.addEventListener('keyup', () => updateRichToolbarState(effectEditor));
   effectEditor?.addEventListener('mouseup', () => updateRichToolbarState(effectEditor));
+  effectEditor?.addEventListener('input', () => updateRichToolbarState(effectEditor));
   updateRichToolbarState(effectEditor);
   [['cardArtInput','art'],['cardNumberInput','number'],['cardRarityInput','rarity'],['cardTemplate','template']].forEach(([id,key]) => $(`#${id}`)?.addEventListener('change', e => { currentCard()[key] = e.target.value; saveState(); renderCards(); }));
   [['cardWidthInput','width'],['cardHeightInput','height']].forEach(([id,key]) => $(`#${id}`)?.addEventListener('change', e => { currentCard()[key] = Math.max(20, Number(e.target.value) || (key === 'width' ? 63 : 88)); saveState(); renderCards(); }));
@@ -857,11 +869,125 @@ function bindCardEvents() {
   $('#manageTagsButton')?.addEventListener('click', () => openTagManager(false));
 }
 function executeCardEffectCommand(command, value = null) {
+  try { document.execCommand('styleWithCSS', false, true); } catch { /* unsupported command */ }
   let applied = false;
   try { applied = document.execCommand(command, false, value); } catch { /* unsupported command */ }
   if (!applied && command === 'hiliteColor') {
     try { document.execCommand('backColor', false, value); } catch { /* unsupported fallback */ }
   }
+}
+function bindRichColorControls(editor, syncEffect) {
+  if (!editor) return;
+  const toolbar = editor.parentElement?.querySelector('.rich-toolbar');
+  $$('[data-color-trigger]', toolbar).forEach(trigger => trigger.addEventListener('mousedown', event => {
+    event.preventDefault(); rememberCardEffectSelection();
+    const command = trigger.dataset.colorTrigger;
+    const popover = toolbar.querySelector(`[data-color-popover="${command}"]`);
+    const shouldOpen = popover?.hidden;
+    closeRichColorPopovers(shouldOpen ? command : '');
+    if (popover) popover.hidden = !shouldOpen;
+  }));
+  const applyColor = (command, color = '') => {
+    restoreCardEffectSelection(editor);
+    if (color) executeCardEffectCommand(command, color);
+    else clearCardEffectColor(editor, command);
+    editor.focus(); rememberCardEffectSelection(); syncEffect(); updateRichToolbarState(editor); closeRichColorPopovers();
+  };
+  $$('[data-color-command]', toolbar).forEach(swatch => swatch.addEventListener('mousedown', event => {
+    event.preventDefault(); applyColor(swatch.dataset.colorCommand, swatch.dataset.colorValue);
+  }));
+  $$('[data-color-clear]', toolbar).forEach(button => button.addEventListener('mousedown', event => {
+    event.preventDefault(); applyColor(button.dataset.colorClear);
+  }));
+  $$('[data-custom-color]', toolbar).forEach(input => {
+    input.addEventListener('mousedown', rememberCardEffectSelection);
+    input.addEventListener('input', () => {
+      const label = input.closest('.rich-custom-color')?.querySelector('[data-custom-color-value]');
+      if (label) label.textContent = input.value.toUpperCase();
+    });
+    input.addEventListener('change', () => applyColor(input.dataset.customColor, input.value));
+  });
+  toolbar.addEventListener('keydown', event => { if (event.key === 'Escape') { closeRichColorPopovers(); editor.focus(); } });
+}
+function closeRichColorPopovers(except = '') {
+  $$('[data-color-popover]').forEach(popover => { if (popover.dataset.colorPopover !== except) popover.hidden = true; });
+  $$('[data-color-trigger]').forEach(trigger => trigger.setAttribute('aria-expanded', trigger.dataset.colorTrigger === except ? 'true' : 'false'));
+}
+function normalizedCSSColor(value, property = 'color') {
+  if (!value) return '';
+  const probe = document.createElement('span'); probe.style[property] = value;
+  return probe.style[property].replace(/\s+/g, '').toLowerCase();
+}
+function clearCardEffectColor(editor, command) {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return;
+  const range = selection.getRangeAt(0);
+  if (!editor.contains(range.commonAncestorContainer)) return;
+  if (range.collapsed) {
+    const otherCommand = command === 'foreColor' ? 'hiliteColor' : 'foreColor';
+    const otherColor = getCardEffectSelectionColor(editor, otherCommand);
+    const retainedStates = ['bold', 'italic', 'underline', 'strikeThrough'].filter(name => {
+      try { return document.queryCommandState(name); } catch { return false; }
+    });
+    const marker = document.createElement('span'); marker.dataset.richBoundary = 'caret';
+    range.insertNode(marker); liftColorBoundary(marker, editor, command);
+    const caretRange = document.createRange(); caretRange.setStartAfter(marker); caretRange.collapse(true);
+    selection.removeAllRanges(); selection.addRange(caretRange); marker.remove();
+    retainedStates.forEach(name => {
+      try { if (!document.queryCommandState(name)) executeCardEffectCommand(name); } catch { /* browser command state unavailable */ }
+    });
+    if (otherColor) executeCardEffectCommand(otherCommand, otherColor);
+    return;
+  }
+  const startMarker = document.createElement('span');
+  const endMarker = document.createElement('span');
+  startMarker.dataset.richBoundary = 'start'; endMarker.dataset.richBoundary = 'end';
+  const endRange = range.cloneRange(); endRange.collapse(false); endRange.insertNode(endMarker);
+  const startRange = range.cloneRange(); startRange.collapse(true); startRange.insertNode(startMarker);
+  liftColorBoundary(startMarker, editor, command);
+  liftColorBoundary(endMarker, editor, command);
+  const selectedRange = document.createRange(); selectedRange.setStartAfter(startMarker); selectedRange.setEndBefore(endMarker);
+  $$('*', editor).forEach(element => {
+    if (element === startMarker || element === endMarker || !selectedRange.intersectsNode(element)) return;
+    removeCardEffectColorProperty(element, command);
+  });
+  const restoredRange = document.createRange(); restoredRange.setStartAfter(startMarker); restoredRange.setEndBefore(endMarker);
+  selection.removeAllRanges(); selection.addRange(restoredRange);
+  endMarker.remove(); startMarker.remove();
+}
+function liftColorBoundary(marker, editor, command) {
+  let formattedAncestor = closestCardEffectColorAncestor(marker.parentElement, editor, command);
+  while (formattedAncestor) {
+    while (marker.parentElement !== formattedAncestor) splitElementAtMarker(marker, marker.parentElement);
+    splitElementAtMarker(marker, formattedAncestor);
+    formattedAncestor = closestCardEffectColorAncestor(marker.parentElement, editor, command);
+  }
+}
+function splitElementAtMarker(marker, element) {
+  if (!element || !element.parentNode || marker.parentElement !== element) return;
+  const parent = element.parentNode;
+  const right = element.cloneNode(false);
+  while (marker.nextSibling) right.appendChild(marker.nextSibling);
+  parent.insertBefore(marker, element.nextSibling);
+  if (right.childNodes.length) parent.insertBefore(right, marker.nextSibling);
+  if (!element.childNodes.length) element.remove();
+}
+function closestCardEffectColorAncestor(node, editor, command) {
+  while (node && node !== editor) {
+    if (hasCardEffectColorProperty(node, command)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+function hasCardEffectColorProperty(element, command) {
+  if (!element?.style) return false;
+  if (command === 'foreColor') return Boolean(element.style.color || (element.tagName === 'FONT' && element.getAttribute('color')));
+  return Boolean(element.style.backgroundColor || element.getAttribute('bgcolor'));
+}
+function removeCardEffectColorProperty(element, command) {
+  if (command === 'foreColor') { element.style.color = ''; element.removeAttribute('color'); }
+  else { element.style.backgroundColor = ''; element.removeAttribute('bgcolor'); }
+  if (!element.getAttribute('style')) element.removeAttribute('style');
 }
 function rememberCardEffectSelection() {
   const editor = $('#cardEffectEditor'); const selection = window.getSelection();
@@ -880,6 +1006,32 @@ function updateRichToolbarState(editor) {
     try { active = ['bold', 'italic', 'underline', 'justifyLeft', 'justifyCenter', 'insertUnorderedList', 'insertOrderedList'].includes(button.dataset.command) && document.queryCommandState(button.dataset.command); } catch { /* browser command state unavailable */ }
     button.classList.toggle('active', active);
   });
+  ['foreColor', 'hiliteColor'].forEach(command => {
+    const control = editor.parentElement?.querySelector(`[data-color-control="${command}"]`);
+    if (!control) return;
+    const value = getCardEffectSelectionColor(editor, command);
+    const hasColor = value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)';
+    const indicator = control.querySelector('[data-color-indicator]');
+    if (indicator) { indicator.style.setProperty('--rich-tool-color', hasColor ? value : 'transparent'); indicator.classList.toggle('empty', !hasColor); }
+    control.querySelector('[data-color-trigger]')?.classList.toggle('active', Boolean(hasColor));
+    $$('[data-color-value]', control).forEach(swatch => swatch.classList.toggle('selected', hasColor && normalizedCSSColor(swatch.dataset.colorValue, command === 'foreColor' ? 'color' : 'backgroundColor') === normalizedCSSColor(value, command === 'foreColor' ? 'color' : 'backgroundColor')));
+  });
+}
+function getCardEffectSelectionColor(editor, command) {
+  const selection = window.getSelection();
+  let node = selection?.rangeCount && editor.contains(selection.getRangeAt(0).commonAncestorContainer)
+    ? selection.getRangeAt(0).startContainer
+    : cardEffectSelection?.startContainer;
+  if (!node || !editor.contains(node)) return '';
+  if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+  const property = command === 'foreColor' ? 'color' : 'backgroundColor';
+  while (node && node !== editor) {
+    if (node.style?.[property]) return node.style[property];
+    if (command === 'foreColor' && node.tagName === 'FONT' && node.getAttribute('color')) return node.getAttribute('color');
+    if (command === 'hiliteColor' && node.getAttribute?.('bgcolor')) return node.getAttribute('bgcolor');
+    node = node.parentElement;
+  }
+  return '';
 }
 function newCard() { mutate(() => { const c = { id: uid('card'), name: '未命名卡牌', effect: '', tag: '', rarity: '普通', number: `C-${String(state.cards.length + 1).padStart(3, '0')}`, art: '✦', color: 'blue', template: '默认 · 晨雾', width: 63, height: 88 }; state.cards.push(c); state.activeCardId = c.id; }); renderAll(); toast('已创建新单卡，请为它选择标签', 'success'); }
 
@@ -907,8 +1059,16 @@ function openTagManager(selectAfterCreate = false) {
 function renderDecks() {
   const d = currentDeck();
   const total = d ? d.entries.reduce((sum, e) => sum + Number(e.count || 0), 0) : 0;
-  $('#decksPage').innerHTML = `<div class="decks-layout"><aside class="card-panel list-panel"><div class="panel-heading"><span class="panel-title">卡组库</span><span class="panel-hint">${state.decks.length} 组</span></div><div class="list-actions"><button class="primary-button" id="newDeckButton">＋ 新建</button><button class="ghost-button" id="importDeckButton">导入 XLSX</button></div><div class="search-wrap"><input class="search-input" id="deckSearch" placeholder="搜索卡组" /></div><div class="card-list">${state.decks.map(deck => `<div class="card-list-item ${deck.id === state.activeDeckId ? 'selected' : ''}" data-select-deck="${deck.id}"><span class="mini-card purple">▥</span><span class="card-item-text"><span class="card-item-name">${esc(deck.name)}</span><span class="card-item-tag">${deck.entries.length} 种 · ${deck.entries.reduce((s,e)=>s+Number(e.count||0),0)} 张</span></span></div>`).join('')}</div></aside><section class="card-panel deck-editor">${d ? `<div class="deck-header"><div><div class="editor-kicker">DECK / ${esc(d.id.slice(-5).toUpperCase())}</div><div class="deck-title">${esc(d.name)}</div><div class="deck-description">${esc(d.description || '为你的牌组写下一句说明。')}</div></div><div class="stat-row"><div class="stat-card"><span class="stat-value">${d.entries.length}</span><span class="stat-label">卡牌种类</span></div><div class="stat-card"><span class="stat-value">${total}</span><span class="stat-label">卡牌总数</span></div></div></div><div class="field-row"><div class="field"><label>卡组名称</label><input id="deckNameInput" value="${esc(d.name)}"></div><div class="field"><label>描述</label><input id="deckDescriptionInput" value="${esc(d.description || '')}"></div></div><div class="add-card-row"><span class="section-caption">卡组成员 · 拖拽或添加单卡</span><button class="ghost-button" id="addDeckCardButton">＋ 添加单卡</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>卡牌</th><th>标签</th><th>数量</th><th>操作</th></tr></thead><tbody>${d.entries.map((entry, index) => { const c = cardById(entry.cardId); return `<tr><td><strong>${esc(c?.name || '缺失单卡')}</strong></td><td>${esc(c?.tag || '待处理')}</td><td><input class="field qty-input" data-deck-qty="${index}" value="${Number(entry.count || 0)}" type="number" min="0"></td><td><div class="table-actions"><button data-edit-deck-card="${entry.cardId}">编辑</button><button data-remove-deck-card="${index}">移除</button></div></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="inspector-empty">还没有卡组<br>创建一个卡组开始吧</div>'}</section></div>`;
+  $('#decksPage').innerHTML = `<div class="decks-layout"><aside class="card-panel list-panel"><div class="panel-heading"><span class="panel-title">卡组库</span><span class="panel-hint">${state.decks.length} 组</span></div><div class="list-actions"><button class="primary-button" id="newDeckButton">＋ 新建</button><button class="ghost-button" id="importDeckButton">导入 XLSX</button></div><div class="search-wrap"><input class="search-input" id="deckSearch" placeholder="搜索卡组" /></div><div class="card-list">${state.decks.map(deck => `<div class="card-list-item ${deck.id === state.activeDeckId ? 'selected' : ''}" data-select-deck="${deck.id}"><span class="mini-card purple">▥</span><span class="card-item-text"><span class="card-item-name">${esc(deck.name)}</span><span class="card-item-tag">${deck.entries.length} 种 · ${deck.entries.reduce((s,e)=>s+Number(e.count||0),0)} 张</span></span></div>`).join('')}</div></aside><section class="card-panel deck-editor">${d ? `<div class="deck-header"><div><div class="editor-kicker">DECK / ${esc(d.id.slice(-5).toUpperCase())}</div><div class="deck-title">${esc(d.name)}</div><div class="deck-description">${esc(d.description || '为你的牌组写下一句说明。')}</div></div><div class="stat-row"><div class="stat-card"><span class="stat-value">${d.entries.length}</span><span class="stat-label">卡牌种类</span></div><div class="stat-card"><span class="stat-value">${total}</span><span class="stat-label">卡牌总数</span></div></div></div><div class="field-row"><div class="field"><label>卡组名称</label><input id="deckNameInput" value="${esc(d.name)}"></div><div class="field"><label>描述</label><input id="deckDescriptionInput" value="${esc(d.description || '')}"></div></div><div class="add-card-row"><span class="section-caption">卡组成员 · 拖拽或添加单卡</span><button class="ghost-button" id="addDeckCardButton">＋ 添加单卡</button></div><div class="table-wrap"><table class="data-table deck-card-table"><thead><tr><th>卡牌</th><th>标签</th><th>数量</th><th>操作</th></tr></thead><tbody>${d.entries.map((entry, index) => { const c = cardById(entry.cardId); const count = normalizeDeckQuantity(entry.count); const cardName = c?.name || '缺失单卡'; return `<tr><td><strong>${esc(cardName)}</strong></td><td>${esc(c?.tag || '待处理')}</td><td>${renderQuantityStepper({ value: count, inputData: `data-deck-qty="${index}"`, stepData: `data-deck-qty-step="${index}"`, label: `${cardName}的数量` })}</td><td><div class="table-actions"><button data-edit-deck-card="${entry.cardId}">编辑</button><button data-remove-deck-card="${index}">移除</button></div></td></tr>`; }).join('')}</tbody></table></div>` : '<div class="inspector-empty">还没有卡组<br>创建一个卡组开始吧</div>'}</section></div>`;
   bindDeckEvents();
+}
+function normalizeDeckQuantity(value, minimum = 0) {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) ? Math.max(minimum, Math.floor(quantity)) : minimum;
+}
+function renderQuantityStepper({ value, inputData = '', stepData = '', label = '数量', minimum = 0 }) {
+  const count = normalizeDeckQuantity(value, minimum);
+  return `<div class="quantity-stepper" role="group" aria-label="${esc(label)}"><button type="button" class="quantity-step-button" ${stepData} data-quantity-delta="-1" title="减少数量" aria-label="减少${esc(label)}" ${count <= minimum ? 'disabled' : ''}>−</button><input class="quantity-step-input" ${inputData} value="${count}" type="number" min="${minimum}" step="1" inputmode="numeric" aria-label="${esc(label)}"><button type="button" class="quantity-step-button" ${stepData} data-quantity-delta="1" title="增加数量" aria-label="增加${esc(label)}">＋</button></div>`;
 }
 function bindDeckEvents() {
   $('#newDeckButton')?.addEventListener('click', () => { mutate(() => { const d = { id: uid('deck'), name: '新卡组', description: '', entries: [] }; state.decks.push(d); state.activeDeckId = d.id; }); renderAll(); setDesignTab('decks'); toast('已创建新卡组', 'success'); });
@@ -916,16 +1076,34 @@ function bindDeckEvents() {
   $$('[data-select-deck]').forEach(el => el.addEventListener('click', () => { state.activeDeckId = el.dataset.selectDeck; renderDecks(); }));
   $('#deckNameInput')?.addEventListener('input', e => { currentDeck().name = e.target.value; saveState(); });
   $('#deckDescriptionInput')?.addEventListener('input', e => { currentDeck().description = e.target.value; saveState(); });
-  $$('[data-deck-qty]').forEach(el => el.addEventListener('change', e => { mutate(() => currentDeck().entries[Number(el.dataset.deckQty)].count = Math.max(0, Number(e.target.value))); renderDecks(); }));
+  $$('[data-deck-qty]').forEach(el => {
+    el.addEventListener('change', e => { mutate(() => currentDeck().entries[Number(el.dataset.deckQty)].count = normalizeDeckQuantity(e.target.value)); renderDecks(); });
+    el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } });
+  });
+  $$('[data-deck-qty-step]').forEach(el => el.addEventListener('click', () => {
+    const index = Number(el.dataset.deckQtyStep); const entry = currentDeck().entries[index]; if (!entry) return;
+    mutate(() => { entry.count = normalizeDeckQuantity(Number(entry.count) + Number(el.dataset.quantityDelta)); }); renderDecks();
+  }));
   $$('[data-remove-deck-card]').forEach(el => el.addEventListener('click', () => { mutate(() => currentDeck().entries.splice(Number(el.dataset.removeDeckCard), 1)); renderDecks(); }));
   $$('[data-edit-deck-card]').forEach(el => el.addEventListener('click', () => { state.activeCardId = el.dataset.editDeckCard; setDesignTab('cards'); }));
   $('#addDeckCardButton')?.addEventListener('click', openAddCardModal);
 }
 function openAddCardModal() {
   const d = currentDeck();
-  $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal"><button class="modal-close" id="closeModal">×</button><h3>添加单卡到「${esc(d.name)}」</h3><p>选择已有单卡并设置加入数量。</p><div class="field"><label>单卡</label><select id="modalCardSelect">${state.cards.map(c => `<option value="${c.id}">${esc(c.name)} · ${esc(c.tag || '未分类')}</option>`).join('')}</select></div><div class="field"><label>数量</label><input id="modalCardCount" type="number" value="1" min="1"></div><div class="modal-actions"><button class="ghost-button" id="cancelModal">取消</button><button class="primary-button" id="confirmAddCard">添加到卡组</button></div></div></div>`;
+  $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal"><button class="modal-close" id="closeModal">×</button><h3>添加单卡到「${esc(d.name)}」</h3><p>选择已有单卡并设置加入数量。</p><div class="field"><label>单卡</label><select id="modalCardSelect">${state.cards.map(c => `<option value="${c.id}">${esc(c.name)} · ${esc(c.tag || '未分类')}</option>`).join('')}</select></div><div class="field modal-quantity-field"><label>加入数量</label>${renderQuantityStepper({ value: 1, inputData: 'id="modalCardCount"', stepData: 'data-modal-qty-step', label: '加入卡牌的数量', minimum: 1 })}</div><div class="modal-actions"><button class="ghost-button" id="cancelModal">取消</button><button class="primary-button" id="confirmAddCard">添加到卡组</button></div></div></div>`;
   $('#closeModal').onclick = closeModal; $('#cancelModal').onclick = closeModal; $('#modalBackdrop').addEventListener('click', e => { if (e.target.id === 'modalBackdrop') closeModal(); });
-  $('#confirmAddCard').onclick = () => { const id = $('#modalCardSelect').value; const count = Number($('#modalCardCount').value); mutate(() => { const found = d.entries.find(e => e.cardId === id); if (found) found.count += count; else d.entries.push({ cardId: id, count }); }); closeModal(); renderDecks(); toast('已添加到卡组', 'success'); };
+  $$('[data-modal-qty-step]').forEach(button => button.addEventListener('click', () => {
+    const input = $('#modalCardCount'); input.value = normalizeDeckQuantity(Number(input.value) + Number(button.dataset.quantityDelta), 1); updateQuantityStepperButtons(input.closest('.quantity-stepper'), 1);
+  }));
+  $('#modalCardCount').addEventListener('input', event => updateQuantityStepperButtons(event.currentTarget.closest('.quantity-stepper'), 1));
+  $('#modalCardCount').addEventListener('change', event => { event.currentTarget.value = normalizeDeckQuantity(event.currentTarget.value, 1); updateQuantityStepperButtons(event.currentTarget.closest('.quantity-stepper'), 1); });
+  $('#confirmAddCard').onclick = () => { const id = $('#modalCardSelect').value; const count = normalizeDeckQuantity($('#modalCardCount').value, 1); mutate(() => { const found = d.entries.find(e => e.cardId === id); if (found) found.count = normalizeDeckQuantity(found.count) + count; else d.entries.push({ cardId: id, count }); }); closeModal(); renderDecks(); toast('已添加到卡组', 'success'); };
+}
+function updateQuantityStepperButtons(stepper, minimum = 0) {
+  if (!stepper) return;
+  const input = stepper.querySelector('.quantity-step-input');
+  const decrease = stepper.querySelector('[data-quantity-delta="-1"]');
+  if (decrease) decrease.disabled = normalizeDeckQuantity(input?.value, minimum) <= minimum;
 }
 function closeModal() { $('#modalRoot').innerHTML = ''; }
 
@@ -1729,7 +1907,8 @@ function bindGlobal() {
   $('#saveSessionButton').onclick = () => { saveState(true); toast('试玩状态已保存', 'success'); };
   $('#importFileInput').addEventListener('change', async event => { const file = event.target.files[0]; if (file) await importProjectFile(file); event.target.value = ''; });
   $('#cardImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'cards'); e.target.value = ''; }); $('#deckImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'deck'); e.target.value = ''; });
-  document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveState(true); toast('已保存', 'success'); } });
+  document.addEventListener('mousedown', e => { if (!e.target.closest?.('.rich-color-control')) closeRichColorPopovers(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRichColorPopovers(); if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveState(true); toast('已保存', 'success'); } });
 }
 
 function openNewProjectModal() {

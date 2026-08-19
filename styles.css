@@ -229,11 +229,32 @@ button { cursor: pointer; }
 .editor-title-row { display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px; }
 .editor-kicker { color: var(--lime); font: 10px 'DM Mono', monospace; letter-spacing: 1px; text-transform: uppercase; }
 .editor-title { font-size: 20px; font-weight: 800; margin-top: 5px; }
-.rich-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 7px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; background: rgba(255,255,255,.025); }
+.rich-toolbar { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 7px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; background: rgba(255,255,255,.025); }
 .rich-toolbar button { width: 29px; height: 26px; border: 0; border-radius: 5px; color: var(--muted); background: transparent; font-size: 11px; }
 .rich-toolbar button:hover, .rich-toolbar button.active { background: rgba(213,245,103,.14); color: var(--lime); }
 .rich-toolbar-divider { width: 1px; height: 18px; background: var(--line); margin: 0 3px; }
-.highlight-tool { display: inline-block; line-height: 17px; padding: 0 3px; color: #222; background: #fff1a8; border-radius: 2px; }
+.rich-color-control { position: relative; }
+.rich-toolbar .rich-color-trigger { position: relative; display: grid; grid-template-columns: 15px 7px; place-items: center; width: 35px; padding: 1px 4px 4px; }
+.rich-color-glyph { position: relative; line-height: 15px; font-weight: 700; }
+.rich-color-glyph.is-highlight { padding: 0 3px; border-radius: 2px; color: #222; background: #fff1a8; }
+.rich-color-indicator { position: absolute; left: 5px; bottom: 3px; width: 15px; height: 3px; border-radius: 2px; background-color: var(--rich-tool-color); box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); }
+.rich-color-indicator.empty { height: 4px; background-image: linear-gradient(135deg, transparent 42%, #ef6b6b 43%, #ef6b6b 57%, transparent 58%), linear-gradient(45deg, #8a9292 25%, transparent 25%, transparent 75%, #8a9292 75%); background-size: 100% 100%, 4px 4px; }
+.rich-color-chevron { color: var(--dim); font-size: 8px; }
+.rich-color-popover { position: absolute; z-index: 35; top: calc(100% + 7px); left: -42px; width: 218px; padding: 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: #202633; box-shadow: 0 16px 38px rgba(0,0,0,.42); }
+.rich-color-popover[hidden] { display: none; }
+.rich-color-popover-title { margin-bottom: 8px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.rich-toolbar .rich-color-clear { display: flex; align-items: center; gap: 8px; width: 100%; height: 29px; margin-bottom: 8px; padding: 0 7px; color: var(--muted); text-align: left; }
+.rich-toolbar .rich-color-clear:hover { color: var(--text); background: rgba(255,255,255,.06); }
+.rich-color-none { position: relative; width: 16px; height: 16px; flex: none; border: 1px solid var(--line-strong); border-radius: 3px; background: rgba(255,255,255,.04); }
+.rich-color-none::after { content: ''; position: absolute; left: 1px; top: 7px; width: 12px; height: 1px; background: #ef6b6b; transform: rotate(-45deg); }
+.rich-color-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
+.rich-toolbar .rich-color-swatch { position: relative; width: 30px; height: 30px; border: 1px solid rgba(255,255,255,.15); background: var(--swatch-color); box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+.rich-toolbar .rich-color-swatch:hover { background: var(--swatch-color); box-shadow: 0 0 0 2px rgba(213,245,103,.42); }
+.rich-toolbar .rich-color-swatch.selected::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; color: #11151b; font-size: 13px; font-weight: 900; text-shadow: 0 1px rgba(255,255,255,.55); }
+.rich-custom-color { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 9px; cursor: pointer; }
+.rich-custom-color > span:first-child { flex: 1; }
+.rich-custom-color-value { color: var(--dim); font: 8px 'DM Mono', monospace; }
+.rich-custom-color input { width: 25px; height: 22px; padding: 0; border: 1px solid var(--line-strong); border-radius: 4px; background: transparent; cursor: pointer; }
 .rich-editor { min-height: 218px; max-height: 420px; overflow: auto; padding: 13px; border: 1px solid var(--line); border-radius: 0 0 8px 8px; outline: 0; color: var(--text); background: rgba(0,0,0,.14); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rich-editor:focus { border-color: rgba(213,245,103,.65); }
 .rich-editor:empty::before { content: attr(data-placeholder); color: var(--dim); pointer-events: none; }
@@ -274,7 +295,21 @@ button { cursor: pointer; }
 .data-table th { color: var(--dim); font: 10px 'DM Mono', monospace; text-align: left; background: rgba(255,255,255,.025); padding: 10px 12px; }
 .data-table td { color: var(--muted); border-top: 1px solid var(--line); padding: 10px 12px; font-size: 11px; }
 .data-table td strong { color: var(--text); }
-.qty-input { width: 58px !important; padding: 6px 8px !important; }
+.deck-card-table th:nth-child(3), .deck-card-table td:nth-child(3) { width: 126px; }
+.deck-card-table th:last-child, .deck-card-table td:last-child { width: 94px; }
+.quantity-stepper { display: grid; grid-template-columns: 30px 48px 30px; width: 110px; height: 32px; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: rgba(0,0,0,.14); transition: border-color .16s ease, box-shadow .16s ease; }
+.quantity-stepper:focus-within { border-color: rgba(213,245,103,.58); box-shadow: 0 0 0 3px rgba(213,245,103,.07); }
+.quantity-step-button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 0; color: var(--muted); background: rgba(255,255,255,.025); font-size: 15px; line-height: 1; }
+.quantity-step-button:first-child { border-right: 1px solid var(--line); }
+.quantity-step-button:last-child { border-left: 1px solid var(--line); }
+.quantity-step-button:hover:not(:disabled) { color: var(--lime); background: rgba(213,245,103,.1); }
+.quantity-step-button:active:not(:disabled) { background: rgba(213,245,103,.16); }
+.quantity-step-button:disabled { color: rgba(134,145,154,.34); cursor: not-allowed; }
+.quantity-step-input { width: 48px; min-width: 0; height: 30px; padding: 0 3px; border: 0; outline: 0; color: var(--text); background: transparent; font: 600 11px 'DM Mono', monospace; text-align: center; appearance: textfield; }
+.quantity-step-input::-webkit-inner-spin-button, .quantity-step-input::-webkit-outer-spin-button { margin: 0; appearance: none; }
+.modal-quantity-field .quantity-stepper { width: 126px; grid-template-columns: 34px 56px 34px; }
+.modal-quantity-field .quantity-step-button { width: 34px; }
+.modal-quantity-field .quantity-step-input { width: 56px; }
 .table-actions { display: flex; gap: 6px; }
 .table-actions button { border: 0; color: var(--muted); background: transparent; padding: 3px; font-size: 11px; }
 .table-actions button:hover { color: var(--text); }
