@@ -28,7 +28,7 @@
       <nav class="main-nav" aria-label="主导航">
         <button data-view="design" class="nav-item active"><span class="nav-icon">▦</span>桌游设计</button>
         <button data-view="playtest" class="nav-item"><span class="nav-icon">◉</span>桌游试玩</button>
-        <button data-view="export" class="nav-item"><span class="nav-icon">↗</span>文件导出</button>
+        <button data-view="export" class="nav-item"><span class="nav-icon">⇄</span>文件导出与导入</button>
       </nav>
       <div class="top-actions">
         <div class="save-state"><span class="save-dot"></span><span id="saveStatus">已保存</span></div>
@@ -78,8 +78,8 @@
       <section id="exportView" class="view hidden">
         <div class="subnav">
           <div>
-            <span class="breadcrumb">文件导出</span>
-            <div class="page-heading">把你的原型带走</div>
+            <span class="breadcrumb">文件导出与导入</span>
+            <div class="page-heading">管理和迁移桌游项目</div>
           </div>
           <div class="view-actions"><span class="muted-caption">所有文件只在本地处理</span></div>
         </div>
@@ -106,7 +106,7 @@
 
   <div id="toastRegion" class="toast-region" aria-live="polite"></div>
   <div id="modalRoot"></div>
-  <input id="importFileInput" type="file" accept=".bgdesign,.json,.csv,.tsv,.xlsx" hidden />
+  <input id="importFileInput" type="file" accept=".bgdesign,.json,application/json" hidden />
   <input id="assetFileInput" type="file" accept="image/*" hidden />
   <input id="cardImportInput" type="file" accept=".xlsx,.csv,.tsv" hidden />
   <input id="deckImportInput" type="file" accept=".xlsx,.csv,.tsv" hidden />

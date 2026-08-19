@@ -42,6 +42,7 @@ let activeDragEntityId = '';
 let activeDragOffset = null;
 let playtestAnimation = null;
 let playtestAnimationToken = 0;
+let cardEffectSelection = null;
 let aiSettings = loadAISettings();
 const AI_WELCOME_MESSAGE = '你好！我可以根据当前项目创建卡牌、整理卡组、调整版图对象，或解释试玩状态。试试说“创建一张名为迷雾预兆的事件卡”。';
 let aiContexts = {};
@@ -61,8 +62,18 @@ const mcpToolDefinitions = [
   { name: 'add_card_to_deck', description: '向卡组添加单卡或增加单卡数量。', parameters: { type: 'object', required: ['deckId', 'cardId'], properties: { deckId: { type: 'string' }, cardId: { type: 'string' }, count: { type: 'number' } } } },
   { name: 'set_deck_card_count', description: '精确设置一张单卡在卡组中的数量；设为 0 会将其移出卡组。', parameters: { type: 'object', required: ['deckId', 'cardId', 'count'], properties: { deckId: { type: 'string' }, cardId: { type: 'string' }, count: { type: 'number', minimum: 0 } } } },
   { name: 'remove_card_from_deck', description: '从卡组中移除单卡关系。', parameters: { type: 'object', required: ['deckId', 'cardId'], properties: { deckId: { type: 'string' }, cardId: { type: 'string' } } } },
-  { name: 'create_board_object', description: '在指定版图（省略 boardId 时为当前版图）添加卡牌放置格、卡牌放置区、卡组放置区或卡堆。', parameters: { type: 'object', required: ['type'], properties: { boardId: { type: 'string' }, type: { type: 'string', enum: ['card-slot', 'card-zone', 'deck-zone', 'stack'] }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, cardId: { type: 'string' }, deckId: { type: 'string' }, background: { type: 'string' }, locked: { type: 'boolean' }, showName: { type: 'boolean' }, showBack: { type: 'boolean' }, showCount: { type: 'boolean' }, drawTarget: { type: 'string' }, layout: { type: 'string' }, gap: { type: 'number' }, stackMode: { type: 'string' } } } },
-  { name: 'update_board_object', description: '更新指定版图对象的位置、尺寸、名称、绑定关系、样式、排列或试玩行为。', parameters: { type: 'object', required: ['objectId'], properties: { boardId: { type: 'string' }, objectId: { type: 'string' }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, cardId: { type: 'string' }, deckId: { type: 'string' }, background: { type: 'string' }, locked: { type: 'boolean' }, showName: { type: 'boolean' }, showBack: { type: 'boolean' }, showCount: { type: 'boolean' }, drawTarget: { type: 'string' }, layout: { type: 'string' }, gap: { type: 'number' }, stackMode: { type: 'string' } } } },
+  { name: 'list_programmable_zones', description: '列出当前项目中的可编程区域及其程序块摘要。', parameters: { type: 'object', properties: { boardId: { type: 'string' } } } },
+  { name: 'get_programmable_zone', description: '读取一个可编程区域的完整配置，包括嵌套程序块。', parameters: { type: 'object', required: ['zoneId'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' } } } },
+  { name: 'create_programmable_zone', description: '创建一个可编程区域。可直接传入 program，也可以创建后用 add_program_block 添加程序块。', parameters: { type: 'object', properties: { boardId: { type: 'string' }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, program: { type: 'object' } } } },
+  { name: 'update_programmable_zone', description: '更新可编程区域的名称、位置、尺寸、外观或完整程序。', parameters: { type: 'object', required: ['zoneId'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, background: { type: 'string' }, locked: { type: 'boolean' }, showName: { type: 'boolean' }, program: { type: 'object' } } } },
+  { name: 'delete_programmable_zone', description: '删除一个可编程区域及其程序块。', parameters: { type: 'object', required: ['zoneId'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' } } } },
+  { name: 'add_program_block', description: '向可编程区域添加抽牌、洗牌或选择框程序块。parentBlockId 指向选择框时，会添加到其嵌套指令中。来源和目标使用 hand、temporary-selection 或 object:<版图对象ID>。', parameters: { type: 'object', required: ['zoneId', 'type'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' }, parentBlockId: { type: 'string' }, type: { type: 'string', enum: ['draw', 'shuffle', 'select'] }, source: { type: 'string' }, target: { type: 'string' }, count: { type: 'number', minimum: 1 }, max: { type: 'number', minimum: 1 }, selectedTarget: { type: 'string' }, unselectedTarget: { type: 'string' } } } },
+  { name: 'update_program_block', description: '更新可编程区域中的程序块参数或类型。', parameters: { type: 'object', required: ['zoneId', 'blockId'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' }, blockId: { type: 'string' }, type: { type: 'string', enum: ['draw', 'shuffle', 'select'] }, source: { type: 'string' }, target: { type: 'string' }, count: { type: 'number', minimum: 1 }, max: { type: 'number', minimum: 1 }, selectedTarget: { type: 'string' }, unselectedTarget: { type: 'string' } } } },
+  { name: 'remove_program_block', description: '从可编程区域删除一个程序块及其嵌套指令。', parameters: { type: 'object', required: ['zoneId', 'blockId'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' }, blockId: { type: 'string' } } } },
+  { name: 'move_program_block', description: '调整同一层级程序块的执行顺序。', parameters: { type: 'object', required: ['zoneId', 'blockId', 'direction'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' }, blockId: { type: 'string' }, direction: { type: 'string', enum: ['up', 'down'] } } } },
+  { name: 'clear_program', description: '清空可编程区域中的全部程序块。', parameters: { type: 'object', required: ['zoneId'], properties: { boardId: { type: 'string' }, zoneId: { type: 'string' } } } },
+  { name: 'create_board_object', description: '在指定版图（省略 boardId 时为当前版图）添加卡牌放置格、卡牌放置区、卡组放置区、卡堆或可编程区域。可编程区域的 program 为 {blocks:[{type:"draw"|"shuffle"|"select",source,target,count,max,blocks,selectedTarget,unselectedTarget}]}。', parameters: { type: 'object', required: ['type'], properties: { boardId: { type: 'string' }, type: { type: 'string', enum: ['card-slot', 'card-zone', 'deck-zone', 'stack', 'programmable-zone'] }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, cardId: { type: 'string' }, deckId: { type: 'string' }, program: { type: 'object' }, background: { type: 'string' }, locked: { type: 'boolean' }, showName: { type: 'boolean' }, showBack: { type: 'boolean' }, showCount: { type: 'boolean' }, drawTarget: { type: 'string' }, layout: { type: 'string' }, gap: { type: 'number' }, stackMode: { type: 'string' } } } },
+  { name: 'update_board_object', description: '更新指定版图对象的位置、尺寸、名称、绑定关系、样式、排列、程序或试玩行为。', parameters: { type: 'object', required: ['objectId'], properties: { boardId: { type: 'string' }, objectId: { type: 'string' }, name: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, cardId: { type: 'string' }, deckId: { type: 'string' }, program: { type: 'object' }, background: { type: 'string' }, locked: { type: 'boolean' }, showName: { type: 'boolean' }, showBack: { type: 'boolean' }, showCount: { type: 'boolean' }, drawTarget: { type: 'string' }, layout: { type: 'string' }, gap: { type: 'number' }, stackMode: { type: 'string' } } } },
   { name: 'delete_board_object', description: '删除指定版图（省略 boardId 时为当前版图）中的一个对象。', parameters: { type: 'object', required: ['objectId'], properties: { boardId: { type: 'string' }, objectId: { type: 'string' } } } },
   { name: 'create_board', description: '创建一个空白版图。', parameters: { type: 'object', required: ['name'], properties: { name: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, background: { type: 'string' } } } },
   { name: 'update_board', description: '更新版图名称、尺寸或背景。', parameters: { type: 'object', required: ['boardId'], properties: { boardId: { type: 'string' }, name: { type: 'string' }, width: { type: 'number' }, height: { type: 'number' }, background: { type: 'string' } } } },
@@ -208,12 +219,12 @@ function normalizeState() {
   state = { ...seed, ...state, project: { ...seed.project, ...(state.project || {}) }, playtest: { ...seed.playtest, ...(state.playtest || {}) } };
   state.boards = Array.isArray(state.boards) ? state.boards : seed.boards;
   state.cards = Array.isArray(state.cards) ? state.cards : [];
-  state.cards.forEach(card => { card.template = card.template || '默认 · 晨雾'; card.width = Number(card.width || 63); card.height = Number(card.height || 88); });
+  state.cards.forEach(card => { card.template = card.template || '默认 · 晨雾'; card.width = Number(card.width || 63); card.height = Number(card.height || 88); card.effect = sanitizeCardEffectHTML(card.effect || ''); });
   const existingCardTags = state.cards.map(card => card.tag).filter(tag => tag && tag !== '未分类');
   state.tags = [...new Set([...(Array.isArray(state.tags) ? state.tags : []), ...existingCardTags])];
   state.decks = Array.isArray(state.decks) ? state.decks : [];
   state.decks.forEach(deck => { deck.entries = Array.isArray(deck.entries) ? deck.entries : []; deck.description = deck.description || ''; });
-  state.boards.forEach(board => { board.objects = Array.isArray(board.objects) ? board.objects : []; board.objects.forEach(object => { object.showName = object.showName !== false; object.showCount = object.showCount !== false; object.gap = Number(object.gap || 10); object.stackMode = object.stackMode || '顶牌'; }); });
+  state.boards.forEach(board => { board.objects = Array.isArray(board.objects) ? board.objects : []; board.objects.forEach(object => { object.showName = object.showName !== false; object.showCount = object.showCount !== false; object.gap = Number(object.gap || 10); object.stackMode = object.stackMode || '顶牌'; if (object.type === 'programmable-zone') object.program = normalizeProgram(object.program); }); });
   const savedPlayers = Array.isArray(state.playtest.players) ? state.playtest.players : [];
   state.playtest.players = savedPlayers.length ? [{ ...seed.playtest.players[0], ...savedPlayers[0], name: savedPlayers[0].name || '玩家 1' }] : seed.playtest.players;
   const extraHands = savedPlayers.slice(1).flatMap(player => Array.isArray(player.hand) ? player.hand : []);
@@ -400,6 +411,35 @@ function renderAIContent(value = '') {
 
 function sanitizeAIInputHTML(value = '') {
   return sanitizeAIHTML(value).trim();
+}
+function sanitizeCardEffectHTML(value = '') {
+  const source = String(value || '').replace(/\r\n?/g, '\n');
+  if (!source.trim()) return '';
+  const html = /<\/?[a-z][^>]*>/i.test(source) ? source : esc(source).replace(/\n/g, '<br>');
+  return sanitizeAIHTML(html)
+    .replace(/<(?:h1|h2|h3)(\b[^>]*)>/gi, '<p$1><strong>')
+    .replace(/<\/(?:h1|h2|h3)>/gi, '</strong></p>')
+    .trim();
+}
+function insertRichHTML(editor, html, plainText = '') {
+  if (!editor) return;
+  editor.focus();
+  const safeHTML = sanitizeCardEffectHTML(html || plainText);
+  const selection = window.getSelection();
+  let range = cardEffectSelection;
+  if (selection?.rangeCount && editor.contains(selection.getRangeAt(0).commonAncestorContainer)) range = selection.getRangeAt(0);
+  if (!range || !editor.contains(range.commonAncestorContainer)) {
+    editor.insertAdjacentHTML('beforeend', safeHTML);
+    return;
+  }
+  range.deleteContents();
+  const fragment = range.createContextualFragment(safeHTML);
+  const last = fragment.lastChild;
+  range.insertNode(fragment);
+  if (last && selection) {
+    range.setStartAfter(last); range.collapse(true); selection.removeAllRanges(); selection.addRange(range);
+    cardEffectSelection = range.cloneRange();
+  }
 }
 function aiInputPayload(input) {
   const plainText = String(input?.innerText || '').replace(/\u00a0/g, ' ').trim();
@@ -606,9 +646,17 @@ function shuffleCardsIntoPlaytestDeck(deck, cards) {
   });
   shufflePlaytestDeck(deck);
 }
-function objectLabel(type) { return ({ 'card-slot': '卡牌放置格', 'card-zone': '卡牌放置区', 'deck-zone': '卡组放置区', stack: '卡堆' })[type] || type; }
-function objectColor(type) { return ({ 'card-slot': 'blue', 'card-zone': 'green', 'deck-zone': 'purple', stack: 'orange' })[type] || 'blue'; }
-function objectSymbol(type) { return ({ 'card-slot': '▣', 'card-zone': '▤', 'deck-zone': '▥', stack: '▰' })[type] || '▧'; }
+function normalizeProgramBlock(block = {}) {
+  const type = ['draw', 'shuffle', 'select'].includes(block.type) ? block.type : 'draw';
+  const normalized = { id: block.id || uid('block'), type, source: block.source || 'hand', target: block.target || 'hand', count: Math.max(1, Math.floor(Number(block.count) || 1)), max: Math.max(1, Math.floor(Number(block.max) || 1)), selectedTarget: block.selectedTarget || 'hand', unselectedTarget: block.unselectedTarget || 'hand', blocks: [] };
+  if (type === 'select') normalized.blocks = Array.isArray(block.blocks) ? block.blocks.map(normalizeProgramBlock) : [];
+  return normalized;
+}
+function normalizeProgram(program = {}) { return { blocks: Array.isArray(program?.blocks) ? program.blocks.map(normalizeProgramBlock) : [] }; }
+function createProgramBlock(type) { return normalizeProgramBlock({ type, blocks: type === 'select' ? [] : undefined }); }
+function objectLabel(type) { return ({ 'card-slot': '卡牌放置格', 'card-zone': '卡牌放置区', 'deck-zone': '卡组放置区', stack: '卡堆', 'programmable-zone': '可编程区域' })[type] || type; }
+function objectColor(type) { return ({ 'card-slot': 'blue', 'card-zone': 'green', 'deck-zone': 'purple', stack: 'orange', 'programmable-zone': 'green' })[type] || 'blue'; }
+function objectSymbol(type) { return ({ 'card-slot': '▣', 'card-zone': '▤', 'deck-zone': '▥', stack: '▰', 'programmable-zone': '⚙' })[type] || '▧'; }
 
 function renderAll() {
   renderProjectHeader();
@@ -616,7 +664,7 @@ function renderAll() {
   $('#deckCount').textContent = state.decks.length;
   renderBoard(); renderCards(); renderDecks(); renderPlaytest(); renderExport();
   setDesignTab(state.designTab || 'board', false);
-  const viewLabel = ({ design: '桌游设计', playtest: '桌游试玩', export: '文件导出' })[$$('.nav-item.active')[0]?.dataset.view] || '整个项目';
+  const viewLabel = ({ design: '桌游设计', playtest: '桌游试玩', export: '文件导出与导入' })[$$('.nav-item.active')[0]?.dataset.view] || '整个项目';
   setAIContext(`${viewLabel} · 项目「${state.project?.name || '未命名'}」 · ${state.cards.length} 张单卡 · ${state.decks.length} 个卡组`);
   renderAIContextControls();
 }
@@ -630,7 +678,7 @@ function renderBoard() {
   $('#boardPage').innerHTML = `<div class="designer-grid">
     <aside class="card-panel object-library">
       <div class="panel-heading"><span class="panel-title">对象库</span><span class="panel-hint">拖入画布</span></div>
-      ${[['card-slot','blue','▣','卡牌放置格','放置一张卡牌'],['card-zone','green','▤','卡牌放置区','平铺多张卡牌'],['deck-zone','purple','▥','卡组放置区','从卡组抽牌'],['stack','orange','▰','卡堆','弃牌 / 除外区']].map(([type,color,symbol,name,help]) => `<button class="object-card" data-add-object="${type}"><span class="object-icon ${color}">${symbol}</span><span><span class="object-label">${name}</span><span class="object-help">${help}</span></span></button>`).join('')}
+      ${[['card-slot','blue','▣','卡牌放置格','放置一张卡牌'],['card-zone','green','▤','卡牌放置区','平铺多张卡牌'],['deck-zone','purple','▥','卡组放置区','从卡组抽牌'],['stack','orange','▰','卡堆','弃牌 / 除外区'],['programmable-zone','green','⚙','可编程区域','点击执行程序块']].map(([type,color,symbol,name,help]) => `<button class="object-card" data-add-object="${type}"><span class="object-icon ${color}">${symbol}</span><span><span class="object-label">${name}</span><span class="object-help">${help}</span></span></button>`).join('')}
       <div class="layer-section"><div class="panel-heading"><span class="panel-title">图层</span><span class="panel-hint">${board.objects.length} 个对象</span></div>
         ${board.objects.map((o) => `<div class="layer-row ${o.id === state.selectedObjectId ? 'selected' : ''}" data-select-object="${o.id}"><span class="layer-dot" style="background:var(--${objectColor(o.type) === 'blue' ? 'blue' : objectColor(o.type) === 'purple' ? 'purple' : objectColor(o.type) === 'orange' ? 'orange' : 'lime'})"></span><span class="layer-name">${esc(o.name)}</span><span class="layer-type">${objectLabel(o.type)}</span></div>`).join('')}
       </div>
@@ -643,7 +691,45 @@ function renderBoard() {
   bindBoardEvents();
 }
 function renderBoardObject(o) {
-  return `<div class="board-object ${objectColor(o.type)} ${o.id === state.selectedObjectId ? 'selected' : ''}" data-board-object="${o.id}" style="left:${o.x}px;top:${o.y}px;width:${o.width}px;height:${o.height}px;${o.background ? `background:${esc(o.background)};` : ''}"><span class="object-symbol">${objectSymbol(o.type)}</span>${o.showName !== false ? `<span class="object-name">${esc(o.name)}</span>` : ''}${o.type === 'deck-zone' && o.showCount ? '<small>11 张剩余</small>' : ''}</div>`;
+  return `<div class="board-object ${objectColor(o.type)} ${o.type === 'programmable-zone' ? 'programmable-object' : ''} ${o.id === state.selectedObjectId ? 'selected' : ''}" data-board-object="${o.id}" style="left:${o.x}px;top:${o.y}px;width:${o.width}px;height:${o.height}px;${o.background ? `background:${esc(o.background)};` : ''}"><span class="object-symbol">${objectSymbol(o.type)}</span>${o.showName !== false ? `<span class="object-name">${esc(o.name)}</span>` : ''}${o.type === 'deck-zone' && o.showCount ? '<small>11 张剩余</small>' : ''}</div>`;
+}
+function programReferenceOptions(selected = 'hand', allowTemporary = false) {
+  const refs = [{ value: 'hand', label: '玩家手牌' }, ...currentBoard().objects.filter(item => ['deck-zone', 'stack', 'card-zone'].includes(item.type)).map(item => ({ value: `object:${item.id}`, label: item.name }))];
+  if (allowTemporary) refs.push({ value: 'temporary-selection', label: '临时选择区' });
+  return refs.map(ref => `<option value="${esc(ref.value)}" ${selected === ref.value ? 'selected' : ''}>${esc(ref.label)}</option>`).join('');
+}
+function renderProgramBlock(block, nested = false, index = 0) {
+  const typeMeta = { draw: ['抽牌指令', '▥', 'blue'], shuffle: ['洗牌指令', '⟳', 'purple'], select: ['卡牌选择', '◇', 'orange'] }[block.type];
+  const body = block.type === 'draw'
+    ? `<div class="program-fields"><div class="program-field wide"><label>来源区域</label><select data-program-field="source" data-program-block="${block.id}">${programReferenceOptions(block.source, nested)}</select></div><div class="program-field compact"><label>顶部抽取</label><div class="program-count-input"><input type="number" min="1" data-program-field="count" data-program-block="${block.id}" value="${block.count}"><span>张</span></div></div><div class="program-flow-arrow">↓</div><div class="program-field wide"><label>发送目标</label><select data-program-field="target" data-program-block="${block.id}">${programReferenceOptions(block.target, nested)}</select></div></div>`
+    : block.type === 'shuffle'
+      ? `<div class="program-fields"><div class="program-field wide"><label>收集全部卡牌</label><select data-program-field="source" data-program-block="${block.id}">${programReferenceOptions(block.source, nested)}</select></div><div class="program-flow-arrow">↓ 洗牌</div><div class="program-field wide"><label>放入目标</label><select data-program-field="target" data-program-block="${block.id}">${programReferenceOptions(block.target, nested)}</select></div></div>`
+      : `<div class="program-fields"><div class="program-field compact"><label>选择上限</label><div class="program-count-input"><input type="number" min="1" data-program-field="max" data-program-block="${block.id}" value="${block.max}"><span>张</span></div></div></div><div class="program-nested"><div class="program-nested-heading"><span>打开选择框前执行</span><small>${block.blocks?.length || 0} 条</small></div>${block.blocks?.length ? block.blocks.map((child, childIndex) => renderProgramBlock(child, true, childIndex)).join('') : '<div class="program-empty"><span>◇</span>尚无准备指令</div>'}<div class="program-inline-add"><button type="button" data-program-add="draw" data-program-parent="${block.id}">＋ 抽牌</button><button type="button" data-program-add="shuffle" data-program-parent="${block.id}">＋ 洗牌</button></div></div><div class="program-fields result-fields"><div class="program-field wide"><label>已选卡牌发往</label><select data-program-field="selectedTarget" data-program-block="${block.id}">${programReferenceOptions(block.selectedTarget, true)}</select></div><div class="program-field wide"><label>未选卡牌发往</label><select data-program-field="unselectedTarget" data-program-block="${block.id}">${programReferenceOptions(block.unselectedTarget, true)}</select></div></div>`;
+  return `<div class="program-block ${block.type} ${nested ? 'nested-block' : ''}" data-program-node="${block.id}"><div class="program-block-head"><div class="program-block-title"><span class="program-order">${index + 1}</span><span class="program-type-icon ${typeMeta[2]}">${typeMeta[1]}</span><span><strong>${typeMeta[0]}</strong><small>${block.type === 'draw' ? '从顶部取牌' : block.type === 'shuffle' ? '合并并随机排序' : '打开临时选择区'}</small></span></div><span class="program-block-actions"><button type="button" aria-label="上移" title="上移" data-program-move="up" data-program-block="${block.id}">↑</button><button type="button" aria-label="下移" title="下移" data-program-move="down" data-program-block="${block.id}">↓</button><button class="program-delete" type="button" aria-label="删除" title="删除" data-program-remove="${block.id}">×</button></span></div>${body}</div>`;
+}
+function renderProgramEditor(o) {
+  const program = normalizeProgram(o.program);
+  o.program = program;
+  return `<div class="inspector-section program-editor"><div class="program-section-heading"><div><div class="section-label">执行程序</div><p>试玩时点击此区域，按顺序执行以下指令。</p></div><span class="program-count-badge">${program.blocks.length} 条</span></div><div class="program-block-list">${program.blocks.length ? program.blocks.map((block, index) => renderProgramBlock(block, false, index)).join('') : '<div class="program-empty program-empty-main"><span>⚙</span><strong>还没有程序指令</strong><small>从下方选择一种指令开始编排</small></div>'}</div><div class="program-add-panel"><div class="program-add-title">添加指令</div><div class="program-add-grid"><button type="button" data-program-add="draw"><span class="program-add-icon blue">▥</span><span><strong>抽牌</strong><small>从顶部取牌</small></span></button><button type="button" data-program-add="shuffle"><span class="program-add-icon purple">⟳</span><span><strong>洗牌</strong><small>合并所有卡牌</small></span></button><button type="button" data-program-add="select"><span class="program-add-icon orange">◇</span><span><strong>卡牌选择</strong><small>玩家临时选择</small></span></button></div></div></div>`;
+}
+function findProgramList(blocks, blockId) {
+  if (!blockId) return blocks;
+  for (const block of blocks) { if (block.id === blockId && block.type === 'select') return block.blocks; const nested = findProgramList(block.blocks || [], blockId); if (nested) return nested; }
+  return null;
+}
+function findProgramBlock(blocks, blockId) { for (const block of blocks) { if (block.id === blockId) return block; const found = findProgramBlock(block.blocks || [], blockId); if (found) return found; } return null; }
+function removeProgramBlock(blocks, blockId) { const index = blocks.findIndex(block => block.id === blockId); if (index >= 0) { blocks.splice(index, 1); return true; } return blocks.some(block => removeProgramBlock(block.blocks || [], blockId)); }
+function moveProgramBlock(blocks, blockId, direction) { const index = blocks.findIndex(block => block.id === blockId); if (index >= 0) { const next = index + direction; if (next < 0 || next >= blocks.length) return; [blocks[index], blocks[next]] = [blocks[next], blocks[index]]; return; } blocks.some(block => moveProgramBlock(block.blocks || [], blockId, direction)); }
+function programmableZoneById(zoneId, boardId = '') {
+  const board = boardId ? boardById(boardId) : currentBoard();
+  const zone = board?.objects.find(object => object.id === zoneId && object.type === 'programmable-zone');
+  if (!zone) throw new Error('找不到可编程区域');
+  zone.program = normalizeProgram(zone.program);
+  return { board, zone };
+}
+function programBlockForArgs(args = {}) {
+  const block = normalizeProgramBlock({ type: args.type, source: args.source, target: args.target, count: args.count, max: args.max, selectedTarget: args.selectedTarget, unselectedTarget: args.unselectedTarget });
+  return block;
 }
 function renderInspector(o) {
   return `<div class="panel-heading"><span class="panel-title">属性检查器</span><button class="danger-button" data-delete-object="${o.id}">删除</button></div>
@@ -652,7 +738,8 @@ function renderInspector(o) {
     <div class="inspector-section"><div class="section-label">外观</div><div class="field"><label>背景颜色</label><input type="text" data-object-field="background" value="${esc(o.background || '')}" placeholder="使用默认颜色"></div><div class="toggle-line">显示对象名称 <button class="switch ${o.showName !== false ? 'on' : ''}" data-toggle-field="showName"><span></span></button></div><div class="toggle-line">锁定对象 <button class="switch ${o.locked ? 'on' : ''}" data-toggle-field="locked"><span></span></button></div></div>
     ${o.type === 'card-slot' ? `<div class="inspector-section"><div class="section-label">绑定卡牌</div><div class="field"><label>指定卡牌</label><select data-object-field="cardId"><option value="">任意卡牌</option>${state.cards.map(c => `<option value="${c.id}" ${o.cardId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></div><div class="toggle-line">显示卡牌背面 <button class="switch ${o.showBack ? 'on' : ''}" data-toggle-field="showBack"><span></span></button></div></div>` : ''}
     ${o.type === 'deck-zone' ? `<div class="inspector-section"><div class="section-label">绑定卡组</div><div class="field"><label>卡组</label><select data-object-field="deckId">${state.decks.map(d => `<option value="${d.id}" ${o.deckId === d.id ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}</select></div><div class="toggle-line">显示剩余数量 <button class="switch ${o.showCount !== false ? 'on' : ''}" data-toggle-field="showCount"><span></span></button></div><div class="field"><label>抽出后进入</label><select data-object-field="drawTarget"><option>玩家手牌</option><option ${o.drawTarget === '玩家区域' ? 'selected' : ''}>玩家区域</option></select></div></div>` : ''}
-    ${o.type === 'card-zone' ? `<div class="inspector-section"><div class="section-label">排列方式</div><div class="field"><label>卡牌排列</label><select data-object-field="layout"><option ${o.layout === '平铺' ? 'selected' : ''}>平铺</option><option ${o.layout === '网格' ? 'selected' : ''}>网格</option><option ${o.layout === '扇形' ? 'selected' : ''}>扇形</option></select></div></div>` : ''}`;
+    ${o.type === 'card-zone' ? `<div class="inspector-section"><div class="section-label">排列方式</div><div class="field"><label>卡牌排列</label><select data-object-field="layout"><option ${o.layout === '平铺' ? 'selected' : ''}>平铺</option><option ${o.layout === '网格' ? 'selected' : ''}>网格</option><option ${o.layout === '扇形' ? 'selected' : ''}>扇形</option></select></div></div>` : ''}
+    ${o.type === 'programmable-zone' ? renderProgramEditor(o) : ''}`;
 }
 function bindBoardEvents() {
   $$('.object-card').forEach((el) => el.addEventListener('click', () => addBoardObject(el.dataset.addObject)));
@@ -672,12 +759,29 @@ function bindBoardEvents() {
   });
   $$('#boardPage [data-object-field]').forEach((el) => el.addEventListener('change', () => { const o = currentBoard().objects.find(x => x.id === state.selectedObjectId); if (!o) return; mutate(() => { const key = el.dataset.objectField; o[key] = ['x','y','width','height'].includes(key) ? Number(el.value) : el.value; }); renderBoard(); }));
   $$('#boardPage [data-toggle-field]').forEach((el) => el.addEventListener('click', () => { const o = currentBoard().objects.find(x => x.id === state.selectedObjectId); mutate(() => o[el.dataset.toggleField] = !o[el.dataset.toggleField]); renderBoard(); }));
+  $$('#boardPage [data-program-add]').forEach((el) => el.addEventListener('click', () => {
+    const object = currentBoard().objects.find(item => item.id === state.selectedObjectId); if (!object) return;
+    mutate(() => { const list = findProgramList(object.program?.blocks || [], el.dataset.programParent || ''); if (!list) return; list.push(createProgramBlock(el.dataset.programAdd)); object.program = normalizeProgram(object.program); });
+    renderBoard();
+  }));
+  $$('#boardPage [data-program-remove]').forEach((el) => el.addEventListener('click', () => {
+    const object = currentBoard().objects.find(item => item.id === state.selectedObjectId); if (!object) return;
+    mutate(() => removeProgramBlock(object.program?.blocks || [], el.dataset.programRemove)); renderBoard();
+  }));
+  $$('#boardPage [data-program-move]').forEach((el) => el.addEventListener('click', () => {
+    const object = currentBoard().objects.find(item => item.id === state.selectedObjectId); if (!object) return;
+    mutate(() => moveProgramBlock(object.program?.blocks || [], el.dataset.programBlock, el.dataset.programMove === 'up' ? -1 : 1)); renderBoard();
+  }));
+  $$('#boardPage [data-program-field]').forEach((el) => el.addEventListener('change', () => {
+    const object = currentBoard().objects.find(item => item.id === state.selectedObjectId); const block = findProgramBlock(object?.program?.blocks || [], el.dataset.programBlock); if (!block) return;
+    mutate(() => { const key = el.dataset.programField; block[key] = ['count', 'max'].includes(key) ? Math.max(1, Math.floor(Number(el.value) || 1)) : el.value; }); renderBoard();
+  }));
   $('#gridTool')?.addEventListener('click', (e) => { $('#boardCanvasWrap').classList.toggle('no-grid'); e.currentTarget.classList.toggle('active'); });
   $('#fitTool')?.addEventListener('click', () => toast('画布已适应窗口', 'success'));
 }
 function addBoardObject(type) {
-  const names = { 'card-slot': '新卡牌放置格', 'card-zone': '新卡牌区域', 'deck-zone': '新卡组牌堆', stack: '新卡堆' };
-  mutate(() => { const object = { id: uid('obj'), type, name: names[type], x: 170 + currentBoard().objects.length * 22, y: 150 + currentBoard().objects.length * 22, width: type === 'card-zone' ? 290 : 138, height: type === 'card-zone' ? 150 : 110, color: objectColor(type), showName: true }; if (type === 'deck-zone') { object.deckId = state.decks[0]?.id; object.showCount = true; object.drawTarget = '玩家手牌'; } currentBoard().objects.push(object); state.selectedObjectId = object.id; }); renderBoard(); toast(`${names[type]}已添加`, 'success');
+  const names = { 'card-slot': '新卡牌放置格', 'card-zone': '新卡牌区域', 'deck-zone': '新卡组牌堆', stack: '新卡堆', 'programmable-zone': '新可编程区域' };
+  mutate(() => { const object = { id: uid('obj'), type, name: names[type], x: 170 + currentBoard().objects.length * 22, y: 150 + currentBoard().objects.length * 22, width: type === 'card-zone' ? 290 : type === 'programmable-zone' ? 190 : 138, height: type === 'card-zone' ? 150 : type === 'programmable-zone' ? 128 : 110, color: objectColor(type), showName: true }; if (type === 'deck-zone') { object.deckId = state.decks[0]?.id; object.showCount = true; object.drawTarget = '玩家手牌'; } if (type === 'programmable-zone') object.program = normalizeProgram(); currentBoard().objects.push(object); state.selectedObjectId = object.id; }); renderBoard(); toast(`${names[type]}已添加`, 'success');
 }
 
 function renderCards() {
@@ -686,12 +790,14 @@ function renderCards() {
   bindCardEvents();
 }
 function renderCardForm(c) {
-  return `<div class="editor-title-row"><div><div class="editor-kicker">CARD / ${esc(c.number || 'NEW')}</div><div class="editor-title">编辑单卡</div></div><button class="danger-button" id="deleteCardButton">删除</button></div><div class="field"><label>卡名</label><input id="cardNameInput" value="${esc(c.name)}" placeholder="例如：余烬火花"></div><div class="field"><label>卡牌效果</label><div class="rich-toolbar">${[['bold','B'],['italic','I'],['underline','U'],['foreColor','A'],['hiliteColor','▰'],['justifyLeft','≡'],['insertUnorderedList','☷']].map(([command,label]) => `<button type="button" data-command="${command}">${label}</button>`).join('')}<button type="button" data-command="removeFormat">清</button></div><div class="rich-editor" id="cardEffectEditor" contenteditable="true">${c.effect || ''}</div><div class="editor-note">支持从飞书粘贴文字，颜色与底色会被保留。</div></div>`;
+  const effectHTML = sanitizeCardEffectHTML(c.effect || '');
+  return `<div class="editor-title-row"><div><div class="editor-kicker">CARD / ${esc(c.number || 'NEW')}</div><div class="editor-title">编辑单卡</div></div><button class="danger-button" id="deleteCardButton">删除</button></div><div class="field"><label>卡名</label><input id="cardNameInput" value="${esc(c.name)}" placeholder="例如：余烬火花"></div><div class="field"><label>卡牌效果</label><div class="rich-toolbar" role="toolbar" aria-label="卡牌效果格式"><button type="button" class="rich-tool" data-command="bold" title="粗体"><strong>B</strong></button><button type="button" class="rich-tool" data-command="italic" title="斜体"><em>I</em></button><button type="button" class="rich-tool" data-command="underline" title="下划线"><u>U</u></button><span class="rich-toolbar-divider"></span><button type="button" class="rich-tool" data-command="foreColor" data-value="#d5f567" title="文字颜色">A</button><button type="button" class="rich-tool" data-command="hiliteColor" data-value="#fff1a8" title="文字底色"><span class="highlight-tool">A</span></button><span class="rich-toolbar-divider"></span><button type="button" class="rich-tool" data-command="justifyLeft" title="左对齐">≡</button><button type="button" class="rich-tool" data-command="justifyCenter" title="居中">≡</button><button type="button" class="rich-tool" data-command="insertUnorderedList" title="项目列表">☷</button><button type="button" class="rich-tool" data-command="insertOrderedList" title="编号列表">1.</button><button type="button" class="rich-tool" data-command="removeFormat" title="清除格式">清</button></div><div class="rich-editor" id="cardEffectEditor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-placeholder="输入卡牌效果……">${effectHTML}</div><div class="editor-note">支持从飞书粘贴文字、颜色、底色、粗体、斜体、下划线、列表和段落。</div></div>`;
 }
 function renderCardPreview(c) {
   const scale = Math.max(.72, Math.min(1.22, Number(c.width || 63) / 63));
   const templateClass = c.template === '简约 · 象牙' ? 'ivory' : c.template === '事件 · 午夜' ? 'midnight' : '';
-  return `<div class="card-preview-wrap"><div class="preview-label">LIVE PREVIEW · 正面</div><div class="playing-card ${templateClass}" style="--card-scale:${scale}"><div class="playing-card-inner"><div class="card-rarity">${esc(c.rarity || '普通')} · ${esc(c.tag || '未分类')}</div><div class="card-title" id="previewName">${esc(c.name || '未命名卡牌')}</div><div class="card-art">${esc(c.art || '✦')}</div><div class="card-effect" id="previewEffect">${c.effect || '<span style="color:#7a8585">卡牌效果将显示在这里</span>'}</div><div class="card-footer"><span>${esc(c.number || 'C-000')}</span><span>${esc(state.project?.name || 'CardFoundry')}</span></div></div></div></div>`;
+  const effectHTML = sanitizeCardEffectHTML(c.effect || '');
+  return `<div class="card-preview-wrap"><div class="preview-label">LIVE PREVIEW · 正面</div><div class="playing-card ${templateClass}" style="--card-scale:${scale}"><div class="playing-card-inner"><div class="card-rarity">${esc(c.rarity || '普通')} · ${esc(c.tag || '未分类')}</div><div class="card-title" id="previewName">${esc(c.name || '未命名卡牌')}</div><div class="card-art">${esc(c.art || '✦')}</div><div class="card-effect" id="previewEffect">${effectHTML || '<span style="color:#7a8585">卡牌效果将显示在这里</span>'}</div><div class="card-footer"><span>${esc(c.number || 'C-000')}</span><span>${esc(state.project?.name || 'CardFoundry')}</span></div></div></div></div>`;
 }
 function renderCardMeta(c) {
   const tagOptions = state.tags.map(tag => `<option value="${esc(tag)}" ${c.tag === tag ? 'selected' : ''}>${esc(tag)}</option>`).join('');
@@ -704,8 +810,43 @@ function bindCardEvents() {
   $('#cardSearch')?.addEventListener('input', (e) => $$('.card-list-item').forEach(el => { el.hidden = !el.textContent.toLowerCase().includes(e.target.value.toLowerCase()); }));
   $('#deleteCardButton')?.addEventListener('click', () => { if (!confirm('确定删除这张单卡？卡组中的引用将保留为缺失项。')) return; mutate(() => { state.cards = state.cards.filter(c => c.id !== state.activeCardId); state.activeCardId = state.cards[0]?.id; }); renderAll(); toast('单卡已删除', 'success'); });
   $('#cardNameInput')?.addEventListener('input', e => { const c = currentCard(); c.name = e.target.value; $('#previewName').textContent = c.name || '未命名卡牌'; saveState(); });
-  $('#cardEffectEditor')?.addEventListener('input', e => { const c = currentCard(); c.effect = e.target.innerHTML; $('#previewEffect').innerHTML = c.effect; saveState(); });
-  $$('[data-command]').forEach(el => el.addEventListener('mousedown', (e) => { e.preventDefault(); document.execCommand(el.dataset.command, false, el.dataset.command === 'foreColor' ? '#d5f567' : undefined); $('#cardEffectEditor')?.focus(); }));
+  const effectEditor = $('#cardEffectEditor');
+  const syncEffect = () => {
+    if (!effectEditor) return;
+    const c = currentCard(); c.effect = sanitizeCardEffectHTML(effectEditor.innerHTML);
+    const preview = $('#previewEffect'); if (preview) preview.innerHTML = c.effect || '<span style="color:#7a8585">卡牌效果将显示在这里</span>';
+    saveState();
+  };
+  effectEditor?.addEventListener('input', syncEffect);
+  effectEditor?.addEventListener('keyup', rememberCardEffectSelection);
+  effectEditor?.addEventListener('mouseup', rememberCardEffectSelection);
+  effectEditor?.addEventListener('focus', rememberCardEffectSelection);
+  effectEditor?.addEventListener('paste', event => {
+    const clipboard = event.clipboardData;
+    if (!clipboard) return;
+    event.preventDefault();
+    insertRichHTML(effectEditor, clipboard.getData('text/html'), clipboard.getData('text/plain'));
+    syncEffect();
+  });
+  $$('.rich-toolbar [data-command]').forEach(el => el.addEventListener('mousedown', event => {
+    event.preventDefault();
+    if (!effectEditor) return;
+    const selection = window.getSelection();
+    if (selection?.rangeCount && effectEditor.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+      cardEffectSelection = selection.getRangeAt(0).cloneRange();
+    }
+    restoreCardEffectSelection(effectEditor);
+    const command = el.dataset.command;
+    const value = el.dataset.value || null;
+    executeCardEffectCommand(command, value);
+    effectEditor.focus();
+    rememberCardEffectSelection();
+    syncEffect();
+    updateRichToolbarState(effectEditor);
+  }));
+  effectEditor?.addEventListener('keyup', () => updateRichToolbarState(effectEditor));
+  effectEditor?.addEventListener('mouseup', () => updateRichToolbarState(effectEditor));
+  updateRichToolbarState(effectEditor);
   [['cardArtInput','art'],['cardNumberInput','number'],['cardRarityInput','rarity'],['cardTemplate','template']].forEach(([id,key]) => $(`#${id}`)?.addEventListener('change', e => { currentCard()[key] = e.target.value; saveState(); renderCards(); }));
   [['cardWidthInput','width'],['cardHeightInput','height']].forEach(([id,key]) => $(`#${id}`)?.addEventListener('change', e => { currentCard()[key] = Math.max(20, Number(e.target.value) || (key === 'width' ? 63 : 88)); saveState(); renderCards(); }));
   $('#cardTagInput')?.addEventListener('change', e => {
@@ -715,7 +856,32 @@ function bindCardEvents() {
   });
   $('#manageTagsButton')?.addEventListener('click', () => openTagManager(false));
 }
-function newCard() { mutate(() => { const c = { id: uid('card'), name: '未命名卡牌', effect: '输入卡牌效果……', tag: '', rarity: '普通', number: `C-${String(state.cards.length + 1).padStart(3, '0')}`, art: '✦', color: 'blue', template: '默认 · 晨雾', width: 63, height: 88 }; state.cards.push(c); state.activeCardId = c.id; }); renderAll(); toast('已创建新单卡，请为它选择标签', 'success'); }
+function executeCardEffectCommand(command, value = null) {
+  let applied = false;
+  try { applied = document.execCommand(command, false, value); } catch { /* unsupported command */ }
+  if (!applied && command === 'hiliteColor') {
+    try { document.execCommand('backColor', false, value); } catch { /* unsupported fallback */ }
+  }
+}
+function rememberCardEffectSelection() {
+  const editor = $('#cardEffectEditor'); const selection = window.getSelection();
+  if (!editor || !selection?.rangeCount || !editor.contains(selection.getRangeAt(0).commonAncestorContainer)) return;
+  cardEffectSelection = selection.getRangeAt(0).cloneRange();
+}
+function restoreCardEffectSelection(editor) {
+  const selection = window.getSelection();
+  if (!selection || !cardEffectSelection || !editor.contains(cardEffectSelection.commonAncestorContainer)) return;
+  selection.removeAllRanges(); selection.addRange(cardEffectSelection);
+}
+function updateRichToolbarState(editor) {
+  if (!editor) return;
+  $$('.rich-toolbar [data-command]', editor.parentElement).forEach(button => {
+    let active = false;
+    try { active = ['bold', 'italic', 'underline', 'justifyLeft', 'justifyCenter', 'insertUnorderedList', 'insertOrderedList'].includes(button.dataset.command) && document.queryCommandState(button.dataset.command); } catch { /* browser command state unavailable */ }
+    button.classList.toggle('active', active);
+  });
+}
+function newCard() { mutate(() => { const c = { id: uid('card'), name: '未命名卡牌', effect: '', tag: '', rarity: '普通', number: `C-${String(state.cards.length + 1).padStart(3, '0')}`, art: '✦', color: 'blue', template: '默认 · 晨雾', width: 63, height: 88 }; state.cards.push(c); state.activeCardId = c.id; }); renderAll(); toast('已创建新单卡，请为它选择标签', 'success'); }
 
 function openTagManager(selectAfterCreate = false) {
   $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal"><button class="modal-close" id="closeModal">×</button><h3>管理标签</h3><p>先在这里创建标签，之后即可在单卡属性的下拉菜单中选择。</p><div class="tag-manager-list">${state.tags.length ? state.tags.map(tag => `<div class="tag-manager-item"><span>${esc(tag)}</span><button class="danger-button" data-remove-tag="${esc(tag)}">删除</button></div>`).join('') : '<div class="list-empty">还没有标签，请创建第一个标签。</div>'}</div><div class="field"><label>新标签名称</label><input id="newTagInput" maxlength="30" placeholder="例如：地点、敌人、任务"></div><div class="modal-actions"><button class="ghost-button" id="cancelModal">关闭</button><button class="primary-button" id="createTagButton">添加标签</button></div></div></div>`;
@@ -822,10 +988,20 @@ function executeMCPTool(name, args = {}) {
   let result;
   const run = () => {
     if (name === 'get_project_state') result = projectAIContext();
+    else if (name === 'list_programmable_zones') { const boards = args.boardId ? [boardById(args.boardId)] : state.boards; if (!boards.length || boards.some(board => !board)) throw new Error('找不到版图'); result = boards.flatMap(board => board.objects.filter(object => object.type === 'programmable-zone').map(zone => ({ id: zone.id, boardId: board.id, name: zone.name, x: zone.x, y: zone.y, width: zone.width, height: zone.height, blockCount: normalizeProgram(zone.program).blocks.length, program: normalizeProgram(zone.program) }))); }
+    else if (name === 'get_programmable_zone') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); result = { boardId: board.id, ...JSON.parse(JSON.stringify(zone)) }; }
+    else if (name === 'create_programmable_zone') { const board = args.boardId ? boardById(args.boardId) : currentBoard(); if (!board) throw new Error('找不到版图'); const object = { id: uid('obj'), type: 'programmable-zone', name: String(args.name || '新可编程区域'), x: Number(args.x ?? 150), y: Number(args.y ?? 150), width: Number(args.width ?? 190), height: Number(args.height ?? 128), color: 'green', showName: true, program: normalizeProgram(args.program) }; board.objects.push(object); state.activeBoardId = board.id; state.selectedObjectId = object.id; result = { boardId: board.id, ...object }; }
+    else if (name === 'update_programmable_zone') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); ['name', 'background', 'locked', 'showName'].forEach(key => { if (args[key] !== undefined) zone[key] = key === 'name' ? String(args[key]) : args[key]; }); ['x', 'y', 'width', 'height'].forEach(key => { if (args[key] !== undefined) zone[key] = Number(args[key]); }); if (args.program !== undefined) zone.program = normalizeProgram(args.program); state.activeBoardId = board.id; state.selectedObjectId = zone.id; result = { boardId: board.id, ...zone }; }
+    else if (name === 'delete_programmable_zone') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); board.objects = board.objects.filter(object => object.id !== zone.id); if (state.selectedObjectId === zone.id) state.selectedObjectId = board.objects[0]?.id || ''; result = { boardId: board.id, deleted: zone.id }; }
+    else if (name === 'add_program_block') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); const list = findProgramList(zone.program.blocks, args.parentBlockId || ''); if (!list) throw new Error('找不到父级选择框'); const block = programBlockForArgs(args); list.push(block); state.activeBoardId = board.id; state.selectedObjectId = zone.id; result = { boardId: board.id, zoneId: zone.id, block }; }
+    else if (name === 'update_program_block') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); const block = findProgramBlock(zone.program.blocks, args.blockId); if (!block) throw new Error('找不到程序块'); if (args.type !== undefined) block.type = ['draw', 'shuffle', 'select'].includes(args.type) ? args.type : block.type; ['source', 'target', 'selectedTarget', 'unselectedTarget'].forEach(key => { if (args[key] !== undefined) block[key] = String(args[key]); }); ['count', 'max'].forEach(key => { if (args[key] !== undefined) block[key] = Math.max(1, Math.floor(Number(args[key]) || 1)); }); zone.program = normalizeProgram(zone.program); state.activeBoardId = board.id; state.selectedObjectId = zone.id; result = { boardId: board.id, zoneId: zone.id, block: findProgramBlock(zone.program.blocks, args.blockId) }; }
+    else if (name === 'remove_program_block') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); if (!removeProgramBlock(zone.program.blocks, args.blockId)) throw new Error('找不到程序块'); state.activeBoardId = board.id; state.selectedObjectId = zone.id; result = { removed: args.blockId, zoneId: zone.id }; }
+    else if (name === 'move_program_block') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); moveProgramBlock(zone.program.blocks, args.blockId, args.direction === 'up' ? -1 : 1); state.activeBoardId = board.id; state.selectedObjectId = zone.id; result = { zoneId: zone.id, program: zone.program }; }
+    else if (name === 'clear_program') { const { board, zone } = programmableZoneById(args.zoneId, args.boardId); zone.program = normalizeProgram(); state.activeBoardId = board.id; state.selectedObjectId = zone.id; result = { zoneId: zone.id, cleared: true }; }
     else if (name === 'update_project') { if (args.name !== undefined) state.project.name = String(args.name); if (args.description !== undefined) state.project.description = String(args.description); result = state.project; }
     else if (name === 'add_tag') { const tag = String(args.tag || '').trim(); if (tag && !state.tags.includes(tag)) state.tags.push(tag); result = state.tags; }
-    else if (name === 'create_card') { const card = { id: uid('card'), name: String(args.name || '未命名卡牌'), effect: args.effect || '', tag: args.tag || '', rarity: args.rarity || '普通', number: args.number || `C-${String(state.cards.length + 1).padStart(3, '0')}`, art: args.art || '✦', color: args.color || 'blue', template: args.template || '默认 · 晨雾', width: Math.max(20, Number(args.width || 63)), height: Math.max(20, Number(args.height || 88)) }; if (card.tag && !state.tags.includes(card.tag)) state.tags.push(card.tag); state.cards.push(card); state.activeCardId = card.id; result = card; }
-    else if (name === 'update_card') { const card = cardById(args.cardId); if (!card) throw new Error('找不到单卡'); ['name','effect','tag','rarity','number','art','color','template'].forEach(key => { if (args[key] !== undefined) card[key] = args[key]; }); ['width','height'].forEach(key => { if (args[key] !== undefined) card[key] = Math.max(20, Number(args[key])); }); if (card.tag && !state.tags.includes(card.tag)) state.tags.push(card.tag); result = card; }
+    else if (name === 'create_card') { const card = { id: uid('card'), name: String(args.name || '未命名卡牌'), effect: sanitizeCardEffectHTML(args.effect || ''), tag: args.tag || '', rarity: args.rarity || '普通', number: args.number || `C-${String(state.cards.length + 1).padStart(3, '0')}`, art: args.art || '✦', color: args.color || 'blue', template: args.template || '默认 · 晨雾', width: Math.max(20, Number(args.width || 63)), height: Math.max(20, Number(args.height || 88)) }; if (card.tag && !state.tags.includes(card.tag)) state.tags.push(card.tag); state.cards.push(card); state.activeCardId = card.id; result = card; }
+    else if (name === 'update_card') { const card = cardById(args.cardId); if (!card) throw new Error('找不到单卡'); ['name','tag','rarity','number','art','color','template'].forEach(key => { if (args[key] !== undefined) card[key] = args[key]; }); if (args.effect !== undefined) card.effect = sanitizeCardEffectHTML(args.effect); ['width','height'].forEach(key => { if (args[key] !== undefined) card[key] = Math.max(20, Number(args[key])); }); if (card.tag && !state.tags.includes(card.tag)) state.tags.push(card.tag); result = card; }
     else if (name === 'delete_card') { const card = cardById(args.cardId); if (!card) throw new Error('找不到单卡'); state.cards = state.cards.filter(item => item.id !== args.cardId); if (state.activeCardId === args.cardId) state.activeCardId = state.cards[0]?.id || ''; result = { deleted: args.cardId }; }
     else if (name === 'create_deck') { const deck = { id: uid('deck'), name: String(args.name || '新卡组'), description: args.description || '', entries: [] }; state.decks.push(deck); state.activeDeckId = deck.id; result = deck; }
     else if (name === 'update_deck') { const deck = deckById(args.deckId); if (!deck) throw new Error('找不到卡组'); if (args.name !== undefined) deck.name = args.name; if (args.description !== undefined) deck.description = args.description; result = deck; }
@@ -833,8 +1009,8 @@ function executeMCPTool(name, args = {}) {
     else if (name === 'add_card_to_deck') { const deck = deckById(args.deckId); if (!deck || !cardById(args.cardId)) throw new Error('找不到卡组或单卡'); const entry = deck.entries.find(item => item.cardId === args.cardId); if (entry) entry.count += Number(args.count || 1); else deck.entries.push({ cardId: args.cardId, count: Number(args.count || 1) }); result = deck; }
     else if (name === 'set_deck_card_count') { const deck = deckById(args.deckId); if (!deck || !cardById(args.cardId)) throw new Error('找不到卡组或单卡'); const count = Math.max(0, Number(args.count || 0)); const entry = deck.entries.find(item => item.cardId === args.cardId); if (count === 0) deck.entries = deck.entries.filter(item => item.cardId !== args.cardId); else if (entry) entry.count = count; else deck.entries.push({ cardId: args.cardId, count }); result = deck; }
     else if (name === 'remove_card_from_deck') { const deck = deckById(args.deckId); if (!deck) throw new Error('找不到卡组'); deck.entries = deck.entries.filter(item => item.cardId !== args.cardId); result = deck; }
-    else if (name === 'create_board_object') { const board = args.boardId ? boardById(args.boardId) : currentBoard(); if (!board) throw new Error('找不到版图'); const object = { id: uid('obj'), type: args.type, name: args.name || objectLabel(args.type), x: Number(args.x ?? 150), y: Number(args.y ?? 150), width: Number(args.width ?? (args.type === 'card-zone' ? 290 : 138)), height: Number(args.height ?? (args.type === 'card-zone' ? 150 : 110)), cardId: args.cardId || '', deckId: args.deckId || '', color: objectColor(args.type), background: args.background || '', locked: Boolean(args.locked), showName: args.showName !== false, showBack: Boolean(args.showBack), showCount: args.showCount !== false, drawTarget: args.drawTarget || '玩家手牌', layout: args.layout || '平铺', gap: Number(args.gap ?? 10), stackMode: args.stackMode || '顶牌' }; board.objects.push(object); state.activeBoardId = board.id; state.selectedObjectId = object.id; result = object; }
-    else if (name === 'update_board_object') { const board = args.boardId ? boardById(args.boardId) : currentBoard(); const object = board?.objects.find(item => item.id === args.objectId); if (!object) throw new Error('找不到版图对象'); ['name','cardId','deckId','background','locked','showName','showBack','showCount','drawTarget','layout','stackMode'].forEach(key => { if (args[key] !== undefined) object[key] = args[key]; }); ['x','y','width','height','gap'].forEach(key => { if (args[key] !== undefined) object[key] = Number(args[key]); }); result = object; }
+    else if (name === 'create_board_object') { const board = args.boardId ? boardById(args.boardId) : currentBoard(); if (!board) throw new Error('找不到版图'); const object = { id: uid('obj'), type: args.type, name: args.name || objectLabel(args.type), x: Number(args.x ?? 150), y: Number(args.y ?? 150), width: Number(args.width ?? (args.type === 'card-zone' ? 290 : args.type === 'programmable-zone' ? 190 : 138)), height: Number(args.height ?? (args.type === 'card-zone' ? 150 : args.type === 'programmable-zone' ? 128 : 110)), cardId: args.cardId || '', deckId: args.deckId || '', program: normalizeProgram(args.program), color: objectColor(args.type), background: args.background || '', locked: Boolean(args.locked), showName: args.showName !== false, showBack: Boolean(args.showBack), showCount: args.showCount !== false, drawTarget: args.drawTarget || '玩家手牌', layout: args.layout || '平铺', gap: Number(args.gap ?? 10), stackMode: args.stackMode || '顶牌' }; board.objects.push(object); state.activeBoardId = board.id; state.selectedObjectId = object.id; result = object; }
+    else if (name === 'update_board_object') { const board = args.boardId ? boardById(args.boardId) : currentBoard(); const object = board?.objects.find(item => item.id === args.objectId); if (!object) throw new Error('找不到版图对象'); ['name','cardId','deckId','background','locked','showName','showBack','showCount','drawTarget','layout','stackMode'].forEach(key => { if (args[key] !== undefined) object[key] = args[key]; }); ['x','y','width','height','gap'].forEach(key => { if (args[key] !== undefined) object[key] = Number(args[key]); }); if (args.program !== undefined) object.program = normalizeProgram(args.program); result = object; }
     else if (name === 'delete_board_object') { const board = args.boardId ? boardById(args.boardId) : currentBoard(); if (!board?.objects.some(item => item.id === args.objectId)) throw new Error('找不到版图对象'); board.objects = board.objects.filter(item => item.id !== args.objectId); if (state.selectedObjectId === args.objectId) state.selectedObjectId = ''; result = { deleted: args.objectId }; }
     else if (name === 'create_board') { const board = { id: uid('board'), name: args.name || '新版图', width: Number(args.width || 930), height: Number(args.height || 610), background: args.background || '#111620', objects: [] }; state.boards.push(board); state.activeBoardId = board.id; result = board; }
     else if (name === 'update_board') { const board = state.boards.find(item => item.id === args.boardId); if (!board) throw new Error('找不到版图'); ['name','width','height','background'].forEach(key => { if (args[key] !== undefined) board[key] = args[key]; }); result = board; }
@@ -851,7 +1027,7 @@ function executeMCPTool(name, args = {}) {
     else if (name === 'reset_playtest') { state.playtest.players[0].hand = []; state.playtest.tableCards = []; state.playtest.piles = {}; state.playtest.selectedPileId = ''; state.playtest.decks = []; state.playtest.deckSourceSignature = ''; ensurePlaytestDecks(true); state.playtest.logs = [{ time: '刚刚', text: 'AI 已重新开始试玩会话，牌组已自动洗牌' }]; result = { reset: true, decks: state.playtest.decks.map(deck => ({ id: deck.id, count: deckCardCount(deck) })) }; }
     else throw new Error(`不支持的工具：${name}`);
   };
-  if (name === 'get_project_state') result = projectAIContext();
+  if (['get_project_state', 'list_programmable_zones', 'get_programmable_zone'].includes(name)) run();
   else mutate(run);
   renderAll();
   return result;
@@ -979,19 +1155,21 @@ function renderHandCard(entity) {
 }
 function renderPlayCardFace(card, entity = {}) {
   const name = card?.name || entity.name || '缺失卡牌';
-  return `<div class="play-card-face"><div class="play-card-name">${esc(name)}</div><div class="play-card-art">${esc(card?.art || '✦')}</div><div class="play-card-effect">${card?.effect || '<span style="opacity:.58">暂无卡牌效果</span>'}</div></div>`;
+  const effectHTML = sanitizeCardEffectHTML(card?.effect || '');
+  return `<div class="play-card-face"><div class="play-card-name">${esc(name)}</div><div class="play-card-art">${esc(card?.art || '✦')}</div><div class="play-card-effect">${effectHTML || '<span style="opacity:.58">暂无卡牌效果</span>'}</div></div>`;
 }
 function renderPlayObject(o) {
   const boundCard = o.cardId ? cardById(o.cardId) : null; const boundDeck = o.deckId ? playtestDeckById(o.deckId) : null;
   const pileCount = o.type === 'stack' ? (state.playtest.piles[o.id] || []).length : 0;
   const selected = o.type === 'stack' && state.playtest.selectedPileId === o.id;
   const isDrawZone = o.type === 'deck-zone';
+  const isProgramZone = o.type === 'programmable-zone';
   const animationClass = playtestAnimation?.type === 'draw' && playtestAnimation.objectIds?.includes(o.id)
     ? 'playtest-draw-feedback'
     : playtestAnimation?.type === 'shuffle' && playtestAnimation.objectIds?.includes(o.id)
       ? 'playtest-shuffle-feedback'
       : '';
-  const drawZoneAttributes = isDrawZone ? 'role="button" tabindex="0" aria-label="点击以抽牌" title="点击以抽牌"' : '';
+  const drawZoneAttributes = isDrawZone || isProgramZone ? `role="button" tabindex="0" aria-label="${isProgramZone ? '点击执行程序' : '点击以抽牌'}" title="${isProgramZone ? '点击执行程序' : '点击以抽牌'}"` : '';
   const objectDetail = o.type === 'stack'
     ? `<small>${pileCount} 张牌 · 点击选择</small>`
     : boundCard
@@ -999,8 +1177,8 @@ function renderPlayObject(o) {
       : boundDeck
         ? `<small>${esc(boundDeck.name)} · ${deckCardCount(boundDeck)} 张</small>`
         : '';
-  const drawHint = isDrawZone ? `<span class="draw-zone-hint">${boundDeck ? '点击以抽牌' : '请先绑定卡组'}</span>` : '';
-  return `<div class="board-object ${objectColor(o.type)} ${selected ? 'selected-pile' : ''} ${isDrawZone ? 'draw-zone' : ''} ${animationClass}" style="left:${o.x}px;top:${o.y}px;width:${o.width}px;height:${o.height}px;${o.background ? `background:${esc(o.background)};` : ''}" data-play-object="${o.id}" ${drawZoneAttributes} ${boundCard ? `data-preview-card="${boundCard.id}"` : ''}><span class="object-symbol">${objectSymbol(o.type)}</span>${o.showName !== false ? `<span class="object-name">${esc(o.name)}</span>` : ''}${objectDetail}${drawHint}</div>`;
+  const drawHint = isDrawZone ? `<span class="draw-zone-hint">${boundDeck ? '点击以抽牌' : '请先绑定卡组'}</span>` : isProgramZone ? `<span class="draw-zone-hint">点击执行</span>` : '';
+  return `<div class="board-object ${objectColor(o.type)} ${selected ? 'selected-pile' : ''} ${isDrawZone ? 'draw-zone' : ''} ${isProgramZone ? 'programmable-object draw-zone' : ''} ${animationClass}" style="left:${o.x}px;top:${o.y}px;width:${o.width}px;height:${o.height}px;${o.background ? `background:${esc(o.background)};` : ''}" data-play-object="${o.id}" ${drawZoneAttributes} ${boundCard ? `data-preview-card="${boundCard.id}"` : ''}><span class="object-symbol">${objectSymbol(o.type)}</span>${o.showName !== false ? `<span class="object-name">${esc(o.name)}</span>` : ''}${objectDetail}${drawHint}</div>`;
 }
 function renderPlayedCard(entity) {
   const card = cardById(entity.cardId);
@@ -1029,10 +1207,11 @@ function renderSelectedPilePanel(pileId) {
   const targets = currentBoard().objects.filter(object => object.id !== pileId && (object.type === 'stack' || object.type === 'deck-zone'));
   return `<div class="pile-panel"><div class="section-label">已选择卡堆</div><div class="pile-panel-title">${esc(pile.name)}</div><div class="pile-count"><strong>${cards.length}</strong><span>张牌在堆内</span></div><p class="muted-caption">将这个卡堆中的全部卡牌洗入另一个卡堆或抽卡堆。</p><div class="field"><label>目标牌堆</label><select id="pileTargetSelect">${targets.length ? targets.map(target => `<option value="${target.id}">${esc(target.name)} · ${target.type === 'stack' ? '卡堆' : '抽卡堆'}</option>`).join('') : '<option value="">没有可用目标</option>'}</select></div><button class="primary-button pile-action-button" id="shufflePileButton" ${!cards.length || !targets.length ? 'disabled' : ''}>全部洗入目标牌堆</button><button class="ghost-button pile-action-button" id="closePileButton">取消选择</button></div>`;
 }
-function renderPlayCardPreview(card) {
+function renderPlayCardPreview(card, hint = '移开鼠标后返回试玩操作') {
   if (!card) return `<div class="play-preview-empty">这张牌的数据已不存在</div>`;
   const templateClass = card.template === '简约 · 象牙' ? 'ivory' : card.template === '事件 · 午夜' ? 'midnight' : '';
-  return `<div class="play-card-preview"><div class="preview-label">CARD PREVIEW · 正面</div><div class="playing-card ${templateClass}"><div class="playing-card-inner"><div class="card-rarity">${esc(card.rarity || '普通')} · ${esc(card.tag || '未分类')}</div><div class="card-title">${esc(card.name || '未命名卡牌')}</div><div class="card-art">${esc(card.art || '✦')}</div><div class="card-effect">${card.effect || '<span style="color:#7a8585">卡牌效果将显示在这里</span>'}</div><div class="card-footer"><span>${esc(card.number || 'C-000')}</span><span>${esc(state.project?.name || 'CardFoundry')}</span></div></div></div><div class="play-preview-hint">移开鼠标后返回试玩操作</div></div>`;
+  const effectHTML = sanitizeCardEffectHTML(card.effect || '');
+  return `<div class="play-card-preview"><div class="preview-label">CARD PREVIEW · 正面</div><div class="playing-card ${templateClass}"><div class="playing-card-inner"><div class="card-rarity">${esc(card.rarity || '普通')} · ${esc(card.tag || '未分类')}</div><div class="card-title">${esc(card.name || '未命名卡牌')}</div><div class="card-art">${esc(card.art || '✦')}</div><div class="card-effect">${effectHTML || '<span style="color:#7a8585">卡牌效果将显示在这里</span>'}</div><div class="card-footer"><span>${esc(card.number || 'C-000')}</span><span>${esc(state.project?.name || 'CardFoundry')}</span></div></div></div>${hint ? `<div class="play-preview-hint">${esc(hint)}</div>` : ''}</div>`;
 }
 function bindPlaytestEvents() {
   $$('[data-side-tab]').forEach(el => el.addEventListener('click', () => { $$('[data-side-tab]').forEach(x => x.classList.remove('active')); el.classList.add('active'); $('#playSideContent').innerHTML = renderPlaySide(el.dataset.sideTab); bindSideActions(); }));
@@ -1041,6 +1220,7 @@ function bindPlaytestEvents() {
     const o = currentBoard().objects.find(x => x.id === el.dataset.playObject);
     if (o?.type === 'deck-zone') drawCard(o.deckId);
     else if (o?.type === 'stack') selectPile(o.id);
+    else if (o?.type === 'programmable-zone') executeProgrammableZone(o.id);
     else toast(`${o?.name || '区域'}：可拖入或查看卡牌`);
   };
   $$('[data-play-object]').forEach(el => {
@@ -1053,6 +1233,101 @@ function bindPlaytestEvents() {
   });
   bindPlayCardDragEvents();
   bindPlayCardPreviewEvents();
+}
+function playtestEntity(cardId) { const card = cardById(cardId); return { id: uid('entity'), cardId, name: card?.name || '缺失卡牌', player: 1 }; }
+function takeCardsFromPlaytestSource(reference, count, context) {
+  const limit = Math.max(0, Math.floor(Number(count) || 0)); const taken = [];
+  if (reference === 'temporary-selection') return context.temporarySelection.splice(0, limit);
+  if (reference === 'hand') return state.playtest.players[0].hand.splice(0, limit);
+  const object = currentBoard().objects.find(item => `object:${item.id}` === reference); if (!object) return taken;
+  if (object.type === 'deck-zone') {
+    const deck = playtestDeckById(object.deckId); if (!deck) return taken;
+    for (let index = 0; index < limit; index += 1) { const cardId = drawFromPlaytestDeck(deck); if (!cardId) break; taken.push(playtestEntity(cardId)); }
+  } else if (object.type === 'stack') {
+    const pile = state.playtest.piles[object.id] || [];
+    while (taken.length < limit && pile.length) taken.push(pile.pop());
+  } else if (object.type === 'card-zone') {
+    for (let index = state.playtest.tableCards.length - 1; index >= 0 && taken.length < limit; index -= 1) if (state.playtest.tableCards[index].objectId === object.id) taken.push(state.playtest.tableCards.splice(index, 1)[0]);
+  }
+  return taken;
+}
+function takeAllCardsFromPlaytestSource(reference, context) {
+  if (reference === 'temporary-selection') return context.temporarySelection.splice(0);
+  if (reference === 'hand') return state.playtest.players[0].hand.splice(0);
+  const object = currentBoard().objects.find(item => `object:${item.id}` === reference); if (!object) return [];
+  if (object.type === 'deck-zone') { const deck = playtestDeckById(object.deckId); return deck ? takeCardsFromPlaytestSource(reference, deck.drawPile.length, context) : []; }
+  if (object.type === 'stack') return (state.playtest.piles[object.id] || []).splice(0);
+  if (object.type === 'card-zone') { const cards = state.playtest.tableCards.filter(card => card.objectId === object.id); state.playtest.tableCards = state.playtest.tableCards.filter(card => card.objectId !== object.id); return cards; }
+  return [];
+}
+function sendCardsToPlaytestTarget(cards, reference, context, shuffle = false) {
+  if (!cards.length) return;
+  cards.forEach(card => { delete card.x; delete card.y; delete card.objectId; delete card.tapped; card.player = 1; });
+  if (reference === 'temporary-selection') { context.temporarySelection.push(...cards); if (shuffle) shuffleArray(context.temporarySelection); return; }
+  if (reference === 'hand') { state.playtest.players[0].hand.push(...cards); if (shuffle) shuffleArray(state.playtest.players[0].hand); return; }
+  const object = currentBoard().objects.find(item => `object:${item.id}` === reference); if (!object) { state.playtest.players[0].hand.push(...cards); return; }
+  if (object.type === 'deck-zone') { const deck = playtestDeckById(object.deckId); if (deck) shuffleCardsIntoPlaytestDeck(deck, cards); else state.playtest.players[0].hand.push(...cards); }
+  else if (object.type === 'stack') { state.playtest.piles[object.id] ||= []; state.playtest.piles[object.id].push(...cards); if (shuffle) shuffleArray(state.playtest.piles[object.id]); }
+  else if (object.type === 'card-zone') cards.forEach((card, index) => state.playtest.tableCards.push({ ...card, x: object.x + 12 + index * 24, y: object.y + 12, objectId: object.id, tapped: false }));
+  else state.playtest.players[0].hand.push(...cards);
+}
+async function executeProgramBlocks(blocks, context) {
+  for (const block of blocks) {
+    if (block.type === 'draw') sendCardsToPlaytestTarget(takeCardsFromPlaytestSource(block.source, block.count, context), block.target, context);
+    else if (block.type === 'shuffle') sendCardsToPlaytestTarget(shuffleArray(takeAllCardsFromPlaytestSource(block.source, context)), block.target, context, true);
+    else if (block.type === 'select') {
+      await executeProgramBlocks(block.blocks || [], context);
+      const result = await openTemporaryCardSelection(context.temporarySelection.splice(0), block.max);
+      sendCardsToPlaytestTarget(result.selected, block.selectedTarget, context);
+      sendCardsToPlaytestTarget(result.unselected, block.unselectedTarget, context);
+    }
+  }
+}
+async function executeProgrammableZone(objectId) {
+  const object = currentBoard().objects.find(item => item.id === objectId && item.type === 'programmable-zone');
+  if (!object) return;
+  if (!object.program?.blocks?.length) return toast('这个区域还没有程序块');
+  undoStack.push(JSON.stringify(state));
+  if (undoStack.length > 30) undoStack.shift();
+  redoStack = [];
+  try {
+    const context = { zoneId: object.id, temporarySelection: [] };
+    await executeProgramBlocks(object.program.blocks, context);
+    if (context.temporarySelection.length) sendCardsToPlaytestTarget(context.temporarySelection.splice(0), 'hand', context);
+    state.playtest.logs.unshift({ time: '刚刚', text: `已执行“${object.name}”的程序` });
+    saveState(); renderPlaytest(); toast(`「${object.name}」执行完成`, 'success');
+  } catch (error) { undoStack.pop(); toast(`程序执行失败：${error.message}`); renderPlaytest(); }
+}
+function openTemporaryCardSelection(cards, max) {
+  return new Promise(resolve => {
+    if (!cards.length) { resolve({ selected: [], unselected: [] }); return; }
+    const root = $('#modalRoot'); const selectedIds = new Set(); const limit = Math.max(1, Math.floor(Number(max) || 1));
+    const firstCard = cardById(cards[0].cardId);
+    const finish = confirmed => { const selected = confirmed ? cards.filter(card => selectedIds.has(card.id)) : []; const unselected = cards.filter(card => !selected.some(item => item.id === card.id)); closeModal(); resolve({ selected, unselected }); };
+    root.innerHTML = `<div class="modal-backdrop" id="temporarySelectionBackdrop"><div class="modal temporary-selection-modal"><div class="temporary-selection-header"><div><h3>临时卡牌选择区</h3><p>最多选择 ${limit} 张。取消时所有卡牌都会按“未选中”处理。</p></div><div class="selection-count" id="temporarySelectionCount">已选择 0 / ${limit}</div></div><div class="temporary-selection-body"><div class="temporary-card-grid">${cards.map(entity => `<button type="button" class="temporary-card" data-temporary-card="${entity.id}" data-preview-card="${esc(entity.cardId || '')}" aria-pressed="false">${renderPlayCardFace(cardById(entity.cardId), entity)}<span class="temporary-check">✓</span></button>`).join('')}</div><aside class="temporary-card-preview" id="temporaryCardPreview" aria-live="polite">${renderPlayCardPreview(firstCard, '悬停或聚焦左侧卡牌以查看')}</aside></div><div class="modal-actions"><button class="ghost-button" id="cancelTemporarySelection">取消</button><button class="primary-button" id="confirmTemporarySelection">确认选择</button></div></div></div>`;
+    const showPreview = entityId => {
+      const entity = cards.find(card => card.id === entityId); const preview = $('#temporaryCardPreview');
+      if (entity && preview) preview.innerHTML = renderPlayCardPreview(cardById(entity.cardId), '悬停或聚焦左侧卡牌以查看');
+    };
+    const restorePreview = () => showPreview([...selectedIds][0] || cards[0].id);
+    $$('[data-temporary-card]', root).forEach(button => {
+      button.addEventListener('mouseenter', () => showPreview(button.dataset.temporaryCard));
+      button.addEventListener('mouseleave', restorePreview);
+      button.addEventListener('focus', () => showPreview(button.dataset.temporaryCard));
+      button.addEventListener('blur', restorePreview);
+      button.addEventListener('click', () => {
+        const id = button.dataset.temporaryCard;
+        if (selectedIds.has(id)) selectedIds.delete(id);
+        else if (selectedIds.size < limit) selectedIds.add(id);
+        else return toast(`最多选择 ${limit} 张牌`);
+        button.classList.toggle('selected', selectedIds.has(id));
+        button.setAttribute('aria-pressed', String(selectedIds.has(id)));
+        $('#temporarySelectionCount').textContent = `已选择 ${selectedIds.size} / ${limit}`;
+        showPreview(id);
+      });
+    });
+    $('#confirmTemporarySelection').onclick = () => finish(true); $('#cancelTemporarySelection').onclick = () => finish(false);
+  });
 }
 function bindPlayCardPreviewEvents() {
   const sideContent = $('#playSideContent');
@@ -1286,16 +1561,107 @@ function shuffleCardDeck(deckId) {
   renderPlaytest(); toast(`「${deck.name}」已洗牌`, 'success');
 }
 
+function boardExportSnapshot(board) {
+  const snapshot = JSON.parse(JSON.stringify(board));
+  snapshot.objects = (snapshot.objects || []).map(object => object.type === 'programmable-zone' ? { ...object, program: normalizeProgram(object.program) } : object);
+  return snapshot;
+}
+function buildProjectExportPayload() {
+  const snapshot = JSON.parse(JSON.stringify(state));
+  snapshot.boards = snapshot.boards.map(boardExportSnapshot);
+  return { ...snapshot, format: 'cardfoundry-project', version: 2, exportedAt: new Date().toISOString(), features: { programmableZones: 1, nestedProgramBlocks: 1, richCardEffects: 1 } };
+}
+function projectIntegrityIssues(projectState = state) {
+  const issues = [];
+  const cardIds = new Set(projectState.cards.map(card => card.id));
+  const deckIds = new Set(projectState.decks.map(deck => deck.id));
+  projectState.decks.forEach(deck => deck.entries.forEach(entry => { if (!cardIds.has(entry.cardId)) issues.push(`${deck.name} 引用了缺失单卡`); }));
+  projectState.boards.forEach(board => board.objects.forEach(object => {
+    if (object.cardId && !cardIds.has(object.cardId)) issues.push(`${board.name} / ${object.name} 引用了缺失单卡`);
+    if (object.deckId && !deckIds.has(object.deckId)) issues.push(`${board.name} / ${object.name} 引用了缺失卡组`);
+    if (object.type === 'programmable-zone' && !Array.isArray(object.program?.blocks)) issues.push(`${board.name} / ${object.name} 的程序数据无效`);
+  }));
+  return issues;
+}
 function renderExport() {
-  const totalCards = state.decks.reduce((sum, d) => sum + d.entries.reduce((s,e)=>s+Number(e.count||0),0), 0);
-  $('#exportPage').innerHTML = `<section class="card-panel export-actions"><h3>文件操作</h3><p>导入或导出一个完整的桌游设计文件。所有内容只在本地处理。</p><button class="export-action" id="exportProjectButton"><span class="action-icon">↗</span><span><strong>导出完整项目</strong><small>版图、单卡、卡组与资源</small></span></button><button class="export-action" id="exportBoardButton"><span class="action-icon">▦</span><span><strong>导出当前版图</strong><small>用于分享布局和对象规则</small></span></button><button class="export-action" id="exportCardsButton"><span class="action-icon">▤</span><span><strong>导出全部单卡</strong><small>JSON 数据，可再次导入</small></span></button><button class="export-action" id="importProjectButton"><span class="action-icon">↙</span><span><strong>导入设计文件</strong><small>支持 .bgdesign / .json</small></span></button><div class="file-drop" id="fileDrop"><strong>拖入 .bgdesign 文件</strong>或点击上方按钮选择文件</div></section><section class="card-panel project-overview"><div class="overview-header"><div><h3>项目内容概览</h3><p>${esc(state.project.description)}</p></div><button class="ghost-button" id="checkProjectButton">检查项目</button></div><div class="overview-grid"><div class="overview-tile"><span class="tile-number">${state.boards.length}</span><span class="tile-label">版图</span></div><div class="overview-tile"><span class="tile-number">${state.cards.length}</span><span class="tile-label">单卡</span></div><div class="overview-tile"><span class="tile-number">${state.decks.length}</span><span class="tile-label">卡组</span></div><div class="overview-tile"><span class="tile-number">${totalCards}</span><span class="tile-label">卡牌总数</span></div><div class="overview-tile"><span class="tile-number">${state.playtest.logs.length}</span><span class="tile-label">试玩记录</span></div><div class="overview-tile"><span class="tile-number">本地</span><span class="tile-label">数据存储</span></div></div><div class="section-label">文件格式</div><div class="format-code">manifest.json · project.json · boards.json · cards.json · decks.json · assets/ · playtest/</div></section>`;
-  $('#exportProjectButton').onclick = () => downloadFile(`${state.project.name}.bgdesign`, JSON.stringify({ version: 1, ...state }, null, 2), 'application/json');
-  $('#exportBoardButton').onclick = () => downloadFile(`${currentBoard().name}.json`, JSON.stringify(currentBoard(), null, 2), 'application/json');
-  $('#exportCardsButton').onclick = () => downloadFile(`${state.project.name}-cards.json`, JSON.stringify(state.cards, null, 2), 'application/json');
+  const totalCards = state.decks.reduce((sum, deck) => sum + deck.entries.reduce((count, entry) => count + Number(entry.count || 0), 0), 0);
+  const programmableZones = state.boards.reduce((sum, board) => sum + board.objects.filter(object => object.type === 'programmable-zone').length, 0);
+  const storedProjectCount = new Set([...Object.keys(projectLibrary), state.project.id]).size;
+  $('#exportPage').innerHTML = `<section class="card-panel export-actions transfer-panel"><div class="transfer-heading"><span class="transfer-icon">↙</span><div><h3>导入项目</h3><p>文件会作为新项目保存，不会覆盖当前项目。</p></div></div><div class="file-drop" id="fileDrop" tabindex="0" role="button"><span class="file-drop-icon">⇣</span><strong>拖入 .bgdesign 或 .json</strong><span>导入前需要为项目设置新名称</span></div><button class="primary-button transfer-main-button" id="importProjectButton">选择项目文件</button><div class="transfer-divider"><span>导出</span></div><button class="export-action featured" id="exportProjectButton"><span class="action-icon">↗</span><span><strong>导出完整项目</strong><small>包含版图、单卡、卡组、可编程区域与嵌套程序块</small></span><span class="format-badge">V2</span></button><button class="export-action" id="exportBoardButton"><span class="action-icon">▦</span><span><strong>导出当前版图</strong><small>包含当前版图对象及可编程区域规则</small></span></button><button class="export-action" id="exportCardsButton"><span class="action-icon">▤</span><span><strong>导出全部单卡</strong><small>独立 JSON 单卡数据</small></span></button></section><section class="card-panel project-overview"><div class="overview-header"><div><span class="overview-kicker">CURRENT PROJECT</span><h3>${esc(state.project.name)}</h3><p>${esc(state.project.description || '暂无项目描述')}</p></div><button class="ghost-button" id="checkProjectButton">检查项目</button></div><div class="overview-grid"><div class="overview-tile"><span class="tile-number">${state.boards.length}</span><span class="tile-label">版图</span></div><div class="overview-tile"><span class="tile-number">${state.cards.length}</span><span class="tile-label">单卡</span></div><div class="overview-tile"><span class="tile-number">${state.decks.length}</span><span class="tile-label">卡组</span></div><div class="overview-tile accent"><span class="tile-number">${programmableZones}</span><span class="tile-label">可编程区域</span></div><div class="overview-tile"><span class="tile-number">${totalCards}</span><span class="tile-label">卡牌总数</span></div><div class="overview-tile"><span class="tile-number">${storedProjectCount}</span><span class="tile-label">浏览器项目</span></div></div><div class="export-format-section"><div class="section-label">完整项目格式</div><div class="format-status"><span class="format-status-icon">✓</span><div><strong>CardFoundry Project V2</strong><small>可编程区域、嵌套程序块和富文本卡牌效果均包含在文件中</small></div></div><div class="format-code">project · boards · cards · decks · programmable-zones · playtest</div></div><div class="project-storage-note"><span>◇</span><div><strong>导入项目保存在浏览器项目区域</strong><small>可通过左上角“当前项目”菜单随时切换。</small></div></div></section>`;
+  $('#exportProjectButton').onclick = () => downloadFile(`${state.project.name}.bgdesign`, JSON.stringify(buildProjectExportPayload(), null, 2), 'application/json');
+  $('#exportBoardButton').onclick = () => downloadFile(`${currentBoard().name}.json`, JSON.stringify({ format: 'cardfoundry-board', version: 2, features: { programmableZones: 1, nestedProgramBlocks: 1 }, board: boardExportSnapshot(currentBoard()) }, null, 2), 'application/json');
+  $('#exportCardsButton').onclick = () => downloadFile(`${state.project.name}-cards.json`, JSON.stringify({ format: 'cardfoundry-cards', version: 2, cards: state.cards }, null, 2), 'application/json');
   $('#importProjectButton').onclick = () => $('#importFileInput').click();
-  $('#fileDrop').onclick = () => $('#importFileInput').click(); $('#checkProjectButton').onclick = () => toast('检查完成：未发现缺失引用', 'success');
+  const fileDrop = $('#fileDrop');
+  fileDrop.onclick = () => $('#importFileInput').click();
+  fileDrop.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); $('#importFileInput').click(); } };
+  ['dragenter', 'dragover'].forEach(type => fileDrop.addEventListener(type, event => { event.preventDefault(); fileDrop.classList.add('dragging'); }));
+  ['dragleave', 'drop'].forEach(type => fileDrop.addEventListener(type, event => { event.preventDefault(); fileDrop.classList.remove('dragging'); }));
+  fileDrop.addEventListener('drop', event => { const file = event.dataTransfer?.files?.[0]; if (file) importProjectFile(file); });
+  $('#checkProjectButton').onclick = () => { const issues = projectIntegrityIssues(); toast(issues.length ? `发现 ${issues.length} 个问题：${issues[0]}` : '检查完成：项目引用与程序数据完整', issues.length ? '' : 'success'); };
 }
 function downloadFile(name, content, type) { const blob = new Blob([content], { type }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = name; link.click(); URL.revokeObjectURL(link.href); toast('文件已导出', 'success'); }
+
+function normalizeImportedProjectState(imported, name) {
+  const previousState = state;
+  try {
+    const seed = seedState();
+    const importedCopy = JSON.parse(JSON.stringify(imported));
+    delete importedCopy.format; delete importedCopy.version; delete importedCopy.exportedAt; delete importedCopy.features;
+    state = { ...seed, ...importedCopy };
+    state.project = { ...seed.project, ...(imported.project || {}), id: uid('project'), name };
+    normalizeState();
+    state.playtest.deckSourceSignature = '';
+    ensurePlaytestDecks(true);
+    return JSON.parse(JSON.stringify(state));
+  } finally {
+    state = previousState;
+  }
+}
+function openImportedProjectModal(imported, fileName) {
+  const originalName = String(imported.project?.name || fileName.replace(/\.(?:bgdesign|json)$/i, '') || '导入项目').trim();
+  const existingNames = new Set([...Object.values(projectLibrary).map(projectState => projectState.project?.name), state.project.name].filter(Boolean));
+  let suggestedName = `${originalName}（导入）`;
+  let suggestedIndex = 2;
+  while (existingNames.has(suggestedName)) { suggestedName = `${originalName}（导入 ${suggestedIndex}）`; suggestedIndex += 1; }
+  const boardCount = imported.boards.length;
+  const cardCount = imported.cards.length;
+  const deckCount = imported.decks.length;
+  const programmableCount = imported.boards.reduce((sum, board) => sum + (board.objects || []).filter(object => object.type === 'programmable-zone').length, 0);
+  $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal import-project-modal"><button class="modal-close" id="closeModal">×</button><span class="modal-kicker">IMPORT PROJECT</span><h3>将文件保存为新项目</h3><p>导入不会覆盖“${esc(state.project.name)}”。请为导入的项目设置名称，确认后它会加入左上角项目区域。</p><div class="import-file-summary"><span class="import-file-icon">⇣</span><div><strong>${esc(fileName)}</strong><small>${boardCount} 个版图 · ${cardCount} 张单卡 · ${deckCount} 个卡组 · ${programmableCount} 个可编程区域</small></div><span class="format-badge">V${Number(imported.version || 1)}</span></div><div class="field"><label>新项目名称</label><input id="importProjectNameInput" value="${esc(suggestedName)}" maxlength="60" autocomplete="off"></div><div class="import-project-note"><span>✓</span>版图、卡牌、卡组、可编程区域和嵌套程序块会一并保存。</div><div class="modal-actions"><button class="ghost-button" id="cancelModal">取消</button><button class="primary-button" id="confirmProjectImport">导入并打开</button></div></div></div>`;
+  const nameInput = $('#importProjectNameInput');
+  const finishImport = () => {
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return toast('请填写新项目名称'); }
+    if (name === originalName) { nameInput.focus(); nameInput.select(); return toast('导入项目需要使用一个新名称'); }
+    if (existingNames.has(name)) { nameInput.focus(); nameInput.select(); return toast('项目区域中已有同名项目，请使用其他名称'); }
+    rememberProject();
+    const importedState = normalizeImportedProjectState(imported, name);
+    projectLibrary[importedState.project.id] = JSON.parse(JSON.stringify(importedState));
+    state = importedState;
+    undoStack = []; redoStack = [];
+    closeModal(); renderAll(); switchView('design'); saveState(true);
+    toast(`项目「${name}」已导入并保存到项目区域`, 'success');
+  };
+  $('#closeModal').onclick = closeModal; $('#cancelModal').onclick = closeModal;
+  $('#modalBackdrop').addEventListener('click', event => { if (event.target.id === 'modalBackdrop') closeModal(); });
+  $('#confirmProjectImport').onclick = finishImport;
+  nameInput.addEventListener('keydown', event => { if (event.key === 'Enter') finishImport(); });
+  nameInput.focus(); nameInput.select();
+}
+async function importProjectFile(file) {
+  try {
+    if (!/\.(?:bgdesign|json)$/i.test(file.name)) throw new Error('请选择 .bgdesign 或 .json 项目文件');
+    if (file.size > 25 * 1024 * 1024) throw new Error('项目文件不能超过 25 MB');
+    const imported = JSON.parse(await file.text());
+    if (imported.format === 'cardfoundry-board' || imported.format === 'cardfoundry-cards') throw new Error('这是局部导出文件，请选择完整项目文件');
+    if (!imported.project || !Array.isArray(imported.cards) || !Array.isArray(imported.decks) || !Array.isArray(imported.boards)) throw new Error('文件不包含完整的桌游项目数据');
+    imported.boards.forEach(board => { board.objects = Array.isArray(board.objects) ? board.objects : []; board.objects.forEach(object => { if (object.type === 'programmable-zone') object.program = normalizeProgram(object.program); }); });
+    openImportedProjectModal(imported, file.name);
+  } catch (error) {
+    toast(`导入失败：${error.message}`);
+  }
+}
 
 function setDesignTab(tab, rerender = true) {
   state.designTab = tab; $$('.subnav-tab').forEach(el => el.classList.toggle('active', el.dataset.design === tab));
@@ -1305,7 +1671,7 @@ function setDesignTab(tab, rerender = true) {
 function switchView(view) {
   if (view === 'playtest') { ensurePlaytestDecks(); renderPlaytest(); }
   $$('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.view === view)); $$('.view').forEach(el => el.classList.add('hidden')); $(`#${view}View`).classList.remove('hidden');
-  const viewLabel = ({ design: '桌游设计', playtest: '桌游试玩', export: '文件导出' })[view] || '整个项目';
+  const viewLabel = ({ design: '桌游设计', playtest: '桌游试玩', export: '文件导出与导入' })[view] || '整个项目';
   setAIContext(`${viewLabel} · 项目「${state.project?.name || '未命名'}」 · ${state.cards.length} 张单卡 · ${state.decks.length} 个卡组`);
 }
 
@@ -1313,7 +1679,7 @@ async function importTable(file, target) {
   const text = await file.text(); let rows = [];
   if (file.name.endsWith('.xlsx') && window.XLSX) { const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' }); rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' }); } else { rows = text.trim().split(/\r?\n/).map(line => line.split(/\t|,/)); if (rows.length) { const headers = rows.shift(); rows = rows.map(row => Object.fromEntries(headers.map((h, i) => [h, row[i] || '']))); } }
   if (!rows.length) return toast('没有读取到表格内容');
-  if (target === 'cards') { mutate(() => rows.forEach((row, i) => { const tag = row['标签'] || row.tag || ''; if (tag && !state.tags.includes(tag)) state.tags.push(tag); state.cards.push({ id: uid('card'), name: row['卡名'] || row.name || Object.values(row)[0] || `导入卡牌 ${i+1}`, effect: row['卡牌效果'] || row.effect || '', tag, rarity: row['稀有度'] || '普通', number: `C-${String(state.cards.length + i + 1).padStart(3,'0')}`, art: '✦', color: 'blue', template: row['模板'] || row.template || '默认 · 晨雾', width: Number(row['宽度'] || row.width || 63), height: Number(row['高度'] || row.height || 88) }); })); state.activeCardId = state.cards.at(-1).id; renderAll(); setDesignTab('cards'); toast(`已导入 ${rows.length} 张单卡`, 'success'); }
+  if (target === 'cards') { mutate(() => rows.forEach((row, i) => { const tag = row['标签'] || row.tag || ''; if (tag && !state.tags.includes(tag)) state.tags.push(tag); state.cards.push({ id: uid('card'), name: row['卡名'] || row.name || Object.values(row)[0] || `导入卡牌 ${i+1}`, effect: sanitizeCardEffectHTML(row['卡牌效果'] || row.effect || ''), tag, rarity: row['稀有度'] || '普通', number: `C-${String(state.cards.length + i + 1).padStart(3,'0')}`, art: '✦', color: 'blue', template: row['模板'] || row.template || '默认 · 晨雾', width: Number(row['宽度'] || row.width || 63), height: Number(row['高度'] || row.height || 88) }); })); state.activeCardId = state.cards.at(-1).id; renderAll(); setDesignTab('cards'); toast(`已导入 ${rows.length} 张单卡`, 'success'); }
   if (target === 'deck') { const d = currentDeck(); mutate(() => rows.forEach(row => { const name = row['卡名'] || row.name || Object.values(row)[0]; const c = state.cards.find(card => card.name === name); if (c) { const count = Number(row['数量'] || row.count || 1); const existing = d.entries.find(e => e.cardId === c.id); if (existing) existing.count += count; else d.entries.push({ cardId: c.id, count }); } })); renderDecks(); toast(`已导入卡组成员`, 'success'); }
 }
 
@@ -1361,7 +1727,7 @@ function bindGlobal() {
   $('#helpButton').onclick = () => { $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal"><button class="modal-close" id="closeModal">×</button><h3>CardFoundry 快速指南</h3><p>从左侧对象库添加版图区域；在单卡设计中粘贴飞书富文本；用卡组页设置牌数；最后进入试玩验证抽牌和弃牌。所有内容自动保存在当前浏览器。</p><div class="modal-actions"><button class="primary-button" id="cancelModal">知道了</button></div></div></div>`; $('#closeModal').onclick = closeModal; $('#cancelModal').onclick = closeModal; };
   $('#resetPlaytestButton').onclick = () => { mutate(() => { ensurePlaytestDecks(true); state.playtest.players.forEach(p => p.hand = []); state.playtest.tableCards = []; state.playtest.piles = {}; state.playtest.selectedPileId = ''; state.playtest.logs = [{ time: '刚刚', text: '试玩会话已重新开始，牌组已自动洗牌' }]; }); renderPlaytest(); toast('试玩已重新开始，已洗牌并重置卡组副本', 'success'); };
   $('#saveSessionButton').onclick = () => { saveState(true); toast('试玩状态已保存', 'success'); };
-  $('#importFileInput').addEventListener('change', async e => { const file = e.target.files[0]; if (!file) return; try { const imported = JSON.parse(await file.text()); if (!imported.cards || !imported.boards) throw new Error(); state = { ...seedState(), ...imported }; renderAll(); saveState(true); toast('设计文件导入成功', 'success'); } catch { toast('文件格式无效，导入失败'); } e.target.value = ''; });
+  $('#importFileInput').addEventListener('change', async event => { const file = event.target.files[0]; if (file) await importProjectFile(file); event.target.value = ''; });
   $('#cardImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'cards'); e.target.value = ''; }); $('#deckImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'deck'); e.target.value = ''; });
   document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveState(true); toast('已保存', 'success'); } });
 }
