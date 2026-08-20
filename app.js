@@ -40,8 +40,12 @@ let redoStack = [];
 let projectLibrary = loadProjectLibrary();
 let activeDragEntityId = '';
 let activeDragOffset = null;
+let activeCardDragPreview = null;
 let playtestAnimation = null;
 let playtestAnimationToken = 0;
+let activePlaytestSideTab = 'object';
+let boardGridEnabled = true;
+let boardSnapEnabled = false;
 let cardEffectSelection = null;
 const CARD_EFFECT_COLOR_PRESETS = {
   foreColor: ['#f2f4f4', '#b9c2c2', '#ff6b6b', '#ff9f43', '#ffd93d', '#6bcb77', '#4d96ff', '#845ef7', '#f06595', '#1f2328'],
@@ -233,7 +237,7 @@ function normalizeState() {
   state.tags = [...new Set([...(Array.isArray(state.tags) ? state.tags : []), ...existingCardTags])];
   state.decks = Array.isArray(state.decks) ? state.decks : [];
   state.decks.forEach(deck => { deck.entries = Array.isArray(deck.entries) ? deck.entries : []; deck.entries.forEach(entry => { entry.count = Math.max(0, Math.floor(Number(entry.count) || 0)); }); deck.description = deck.description || ''; });
-  state.boards.forEach(board => { board.objects = Array.isArray(board.objects) ? board.objects : []; board.objects.forEach(object => { object.showName = object.showName !== false; object.showCount = object.showCount !== false; object.gap = Number(object.gap || 10); object.stackMode = object.stackMode || '顶牌'; object.color = objectColor(object.type); if (!Number.isFinite(Number(object.width)) || Number(object.width) <= 0) object.width = defaultObjectDimensions(object.type).width; if (!Number.isFinite(Number(object.height)) || Number(object.height) <= 0) object.height = defaultObjectDimensions(object.type).height; if (object.type === 'programmable-zone') object.program = normalizeProgram(object.program); if (object.type === 'counter') { object.counterRightClickAction = normalizeCounterAction(object.counterRightClickAction); object.counterRightClickValue = normalizeCounterRuleValue(object.counterRightClickValue, object.counterRightClickAction); } }); });
+  state.boards.forEach(board => { board.name = String(board.name || '未命名版图'); const width = Number(board.width); const height = Number(board.height); board.width = Number.isFinite(width) ? Math.max(320, Math.floor(width)) : seed.boards[0].width; board.height = Number.isFinite(height) ? Math.max(240, Math.floor(height)) : seed.boards[0].height; board.objects = Array.isArray(board.objects) ? board.objects : []; board.objects.forEach(object => { object.showName = object.showName !== false; object.showCount = object.showCount !== false; object.gap = Number(object.gap || 10); object.stackMode = object.stackMode || '顶牌'; object.color = objectColor(object.type); if (!Number.isFinite(Number(object.width)) || Number(object.width) <= 0) object.width = defaultObjectDimensions(object.type).width; if (!Number.isFinite(Number(object.height)) || Number(object.height) <= 0) object.height = defaultObjectDimensions(object.type).height; if (object.type === 'programmable-zone') object.program = normalizeProgram(object.program); if (object.type === 'counter') { object.counterRightClickAction = normalizeCounterAction(object.counterRightClickAction); object.counterRightClickValue = normalizeCounterRuleValue(object.counterRightClickValue, object.counterRightClickAction); } }); });
   const savedPlayers = Array.isArray(state.playtest.players) ? state.playtest.players : [];
   state.playtest.players = savedPlayers.length ? [{ ...seed.playtest.players[0], ...savedPlayers[0], name: savedPlayers[0].name || '玩家 1' }] : seed.playtest.players;
   const extraHands = savedPlayers.slice(1).flatMap(player => Array.isArray(player.hand) ? player.hand : []);
@@ -248,6 +252,7 @@ function normalizeState() {
   Object.keys(state.playtest.objectValues).forEach(objectId => { state.playtest.objectValues[objectId] = Math.trunc(Number(state.playtest.objectValues[objectId]) || 0); });
   state.playtest.selectedPileId = state.playtest.selectedPileId || '';
   state.playtest.logs = Array.isArray(state.playtest.logs) ? state.playtest.logs : [];
+  trimPlaytestLogs();
   state.playtest.players.forEach(player => { player.hand = Array.isArray(player.hand) ? player.hand : []; player.hand = player.hand.map(entity => ({ ...entity, cardId: entity.cardId || state.cards.find(card => card.name === entity.name)?.id })); });
   ensurePlaytestDecks();
 }
@@ -262,6 +267,7 @@ function createBlankProject(name, description) {
   };
 }
 function saveState(immediate = false) {
+  trimPlaytestLogs();
   $('#saveStatus').textContent = immediate ? '保存中' : '编辑中';
   $('.save-dot').className = 'save-dot saving';
   clearTimeout(saveTimer);
@@ -278,15 +284,25 @@ function mutate(fn) {
   undoStack.push(JSON.stringify(state));
   if (undoStack.length > 30) undoStack.shift();
   redoStack = [];
-  fn(); saveState();
+  fn(); updateHistoryControls(); saveState();
 }
 function undo() {
   if (!undoStack.length) return toast('没有可撤销的操作');
-  redoStack.push(JSON.stringify(state)); state = JSON.parse(undoStack.pop()); renderAll(); saveState(); toast('已撤销');
+  redoStack.push(JSON.stringify(state)); state = JSON.parse(undoStack.pop()); updateHistoryControls(); renderAll(); saveState(); toast('已撤销');
 }
 function redo() {
   if (!redoStack.length) return toast('没有可重做的操作');
-  undoStack.push(JSON.stringify(state)); state = JSON.parse(redoStack.pop()); renderAll(); saveState(); toast('已重做');
+  undoStack.push(JSON.stringify(state)); state = JSON.parse(redoStack.pop()); updateHistoryControls(); renderAll(); saveState(); toast('已重做');
+}
+function updateHistoryControls() {
+  const undoButton = $('#undoButton');
+  const redoButton = $('#redoButton');
+  if (undoButton) { undoButton.disabled = !undoStack.length; undoButton.setAttribute('aria-disabled', String(!undoStack.length)); undoButton.title = undoStack.length ? '撤销上一步' : '没有可撤销的操作'; }
+  if (redoButton) { redoButton.disabled = !redoStack.length; redoButton.setAttribute('aria-disabled', String(!redoStack.length)); redoButton.title = redoStack.length ? '重做上一步' : '没有可重做的操作'; }
+}
+function trimPlaytestLogs() {
+  if (!Array.isArray(state.playtest?.logs)) return;
+  if (state.playtest.logs.length > 200) state.playtest.logs.length = 200;
 }
 function toast(message, kind = '') {
   const el = document.createElement('div'); el.className = `toast ${kind}`; el.textContent = message; $('#toastRegion').appendChild(el);
@@ -801,8 +817,8 @@ function renderBoard() {
         ${board.objects.map((o) => `<div class="layer-row ${o.id === state.selectedObjectId ? 'selected' : ''}" data-select-object="${o.id}"><span class="layer-dot" style="background:var(--${objectColorVariable(o.type)})"></span><span class="layer-name">${esc(o.name)}</span><span class="layer-type">${objectLabel(o.type)}</span></div>`).join('')}
       </div>
     </aside>
-    <section class="board-shell"><div class="board-toolbar"><button class="tool-button active" id="selectTool">↖ 选择</button><button class="tool-button" id="gridTool">⊞ 网格</button><button class="tool-button" id="snapTool">⌁ 吸附</button><span class="spacer"></span><span class="zoom-label">100%</span><button class="tool-button" id="fitTool">适应画布</button></div>
-      <div class="board-canvas-wrap" id="boardCanvasWrap"><div class="board-canvas" id="boardCanvas"><span class="canvas-label">BOARD / ${esc(board.name).toUpperCase()}</span>${board.objects.map(renderBoardObject).join('')}${board.objects.length ? '' : '<div class="empty-board">从左侧拖入一个对象开始设计</div>'}</div></div><div class="canvas-status"><span>画布 ${board.width} × ${board.height}px</span><span>⌘Z 撤销 · 双击对象编辑名称</span></div>
+    <section class="board-shell"><div class="board-toolbar"><button class="tool-button active" id="selectTool">↖ 选择</button><button class="tool-button ${boardGridEnabled ? 'active' : ''}" id="gridTool" aria-pressed="${boardGridEnabled}">⊞ 网格</button><button class="tool-button ${boardSnapEnabled ? 'active' : ''}" id="snapTool" aria-pressed="${boardSnapEnabled}">⌁ 吸附</button><span class="spacer"></span><span class="zoom-label">100%</span><button class="tool-button" id="fitTool" title="将画布滚动到可视中心">适应画布</button></div>
+      <div class="board-canvas-wrap ${boardGridEnabled ? '' : 'no-grid'}" id="boardCanvasWrap"><div class="board-canvas" id="boardCanvas" style="width:${Number(board.width) || 930}px;height:${Number(board.height) || 610}px"><span class="canvas-label">BOARD / ${esc(board.name).toUpperCase()}</span>${board.objects.map(renderBoardObject).join('')}${board.objects.length ? '' : '<div class="empty-board">从左侧拖入一个对象开始设计</div>'}</div></div><div class="canvas-status"><span>画布 ${board.width} × ${board.height}px</span><span>${boardSnapEnabled ? '已开启网格吸附' : '自由定位'} · 双击对象编辑名称</span></div>
     </section>
     <aside class="card-panel inspector">${selected ? renderInspector(selected) : `<div class="inspector-empty"><div><div class="empty-icon">◈</div>选择一个对象<br>以编辑它的属性</div></div>`}</aside>
   </div>`;
@@ -873,9 +889,9 @@ function bindBoardEvents() {
     el.addEventListener('mousedown', (event) => {
       const object = currentBoard().objects.find(o => o.id === el.dataset.boardObject); if (!object || object.locked) return;
       event.preventDefault(); state.selectedObjectId = object.id; renderBoard();
-      const rect = canvas.getBoundingClientRect(); const startX = event.clientX; const startY = event.clientY; const ox = object.x; const oy = object.y;
-      const move = (e) => { object.x = Math.max(0, Math.min(900, ox + e.clientX - startX)); object.y = Math.max(0, Math.min(580, oy + e.clientY - startY)); renderBoard(); };
-      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); saveState(); };
+      const beforeDrag = JSON.stringify(state); const rect = canvas.getBoundingClientRect(); const startX = event.clientX; const startY = event.clientY; const ox = object.x; const oy = object.y; let moved = false;
+      const move = (e) => { const maxX = Math.max(0, Number(currentBoard().width || 930) - Number(object.width || 0)); const maxY = Math.max(0, Number(currentBoard().height || 610) - Number(object.height || 0)); const rawX = Math.max(0, Math.min(maxX, ox + e.clientX - startX)); const rawY = Math.max(0, Math.min(maxY, oy + e.clientY - startY)); const nextX = boardSnapEnabled ? Math.max(0, Math.min(maxX, Math.round(rawX / 28) * 28)) : rawX; const nextY = boardSnapEnabled ? Math.max(0, Math.min(maxY, Math.round(rawY / 28) * 28)) : rawY; moved ||= object.x !== nextX || object.y !== nextY; object.x = nextX; object.y = nextY; renderBoard(); };
+      const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); if (moved) { undoStack.push(beforeDrag); if (undoStack.length > 30) undoStack.shift(); redoStack = []; updateHistoryControls(); } saveState(); };
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     });
     el.addEventListener('dblclick', () => { const object = currentBoard().objects.find(o => o.id === el.dataset.boardObject); const name = prompt('对象名称', object.name); if (name?.trim()) { mutate(() => object.name = name.trim()); renderBoard(); } });
@@ -899,8 +915,9 @@ function bindBoardEvents() {
     const object = currentBoard().objects.find(item => item.id === state.selectedObjectId); const block = findProgramBlock(object?.program?.blocks || [], el.dataset.programBlock); if (!block) return;
     mutate(() => { const key = el.dataset.programField; block[key] = ['count', 'max'].includes(key) ? Math.max(1, Math.floor(Number(el.value) || 1)) : el.value; }); renderBoard();
   }));
-  $('#gridTool')?.addEventListener('click', (e) => { $('#boardCanvasWrap').classList.toggle('no-grid'); e.currentTarget.classList.toggle('active'); });
-  $('#fitTool')?.addEventListener('click', () => toast('画布已适应窗口', 'success'));
+  $('#gridTool')?.addEventListener('click', () => { boardGridEnabled = !boardGridEnabled; renderBoard(); });
+  $('#snapTool')?.addEventListener('click', () => { boardSnapEnabled = !boardSnapEnabled; renderBoard(); });
+  $('#fitTool')?.addEventListener('click', () => { const wrap = $('#boardCanvasWrap'); if (!wrap) return; wrap.scrollTo({ left: Math.max(0, (wrap.scrollWidth - wrap.clientWidth) / 2), top: Math.max(0, (wrap.scrollHeight - wrap.clientHeight) / 2), behavior: 'smooth' }); toast('画布已定位到可视中心', 'success'); });
 }
 function addBoardObject(type) {
   const names = { 'card-slot': '新卡牌放置格', 'card-zone': '新卡牌区域', 'deck-zone': '新卡组牌堆', stack: '新卡堆', 'programmable-zone': '新可编程区域', dice: '新骰子', counter: '新计数器' };
@@ -1447,7 +1464,9 @@ window.cardFoundryMCP = {
 function renderPlaytest() {
   const board = currentBoard(); const p = state.playtest;
   const player = p.players[0];
-  $('#playtestPage').innerHTML = `<section class="play-board"><div class="board-canvas-wrap"><div class="board-canvas" id="playCanvas"><span class="canvas-label">PLAYTEST / ${esc(board.name).toUpperCase()}</span>${board.objects.map(renderPlayObject).join('')}${(p.tableCards || []).map(renderPlayedCard).join('')}</div></div></section><aside class="card-panel playtest-side"><div class="side-tabs"><button class="side-tab active" data-side-tab="object">当前对象</button><button class="side-tab" data-side-tab="deck">牌组</button><button class="side-tab" data-side-tab="log">游戏日志</button></div><div class="side-content" id="playSideContent">${renderPlaySide('object')}</div></aside><aside class="card-panel player-panel" id="playerHandDropPanel" data-hand-player="1"><div class="hand-panel-heading"><div><span class="panel-title">手牌</span><span class="hand-count">${player.hand.length} 张</span></div><span class="hand-drop-hint">将场上的牌拖回此处</span></div><div class="hand-cards" id="activeHandDropZone" data-hand-player="1">${player.hand.map(renderHandCard).join('') || '<span class="hand-empty-state">抽牌后会显示在这里，也可将场上的牌拖回</span>'}</div></aside>`;
+  const sideTab = ['object', 'deck', 'log'].includes(activePlaytestSideTab) ? activePlaytestSideTab : 'object';
+  activePlaytestSideTab = sideTab;
+  $('#playtestPage').innerHTML = `<section class="play-board"><div class="board-canvas-wrap"><div class="board-canvas" id="playCanvas" style="width:${board.width}px;height:${board.height}px"><span class="canvas-label">PLAYTEST / ${esc(board.name).toUpperCase()}</span>${board.objects.map(renderPlayObject).join('')}${(p.tableCards || []).map(renderPlayedCard).join('')}</div></div></section><aside class="card-panel playtest-side"><div class="side-tabs"><button class="side-tab ${sideTab === 'object' ? 'active' : ''}" data-side-tab="object" aria-selected="${sideTab === 'object'}">当前对象</button><button class="side-tab ${sideTab === 'deck' ? 'active' : ''}" data-side-tab="deck" aria-selected="${sideTab === 'deck'}">牌组</button><button class="side-tab ${sideTab === 'log' ? 'active' : ''}" data-side-tab="log" aria-selected="${sideTab === 'log'}">游戏日志</button></div><div class="side-content" id="playSideContent">${renderPlaySide(sideTab)}</div></aside><aside class="card-panel player-panel" id="playerHandDropPanel" data-hand-player="1"><div class="hand-panel-heading"><div><span class="panel-title">手牌</span><span class="hand-count">${player.hand.length} 张</span></div><span class="hand-drop-hint">将场上的牌拖回此处</span></div><div class="hand-cards" id="activeHandDropZone" data-hand-player="1">${player.hand.map(renderHandCard).join('') || '<span class="hand-empty-state">抽牌后会显示在这里，也可将场上的牌拖回</span>'}</div></aside>`;
   bindPlaytestEvents();
 }
 function renderHandCard(entity) {
@@ -1526,7 +1545,7 @@ function triggerPlaytestAnimation(type, options = {}) {
 function deckCardCount(deck) { return deck?.entries?.reduce((sum, entry) => sum + Number(entry.count || 0), 0) || 0; }
 function renderPlaySide(tab) {
   if (tab === 'deck') return `<div class="section-label">试玩卡组副本</div><p class="muted-caption" style="line-height:1.5">进入试玩时会自动洗牌；试玩中的抽牌和洗牌不会修改设计页卡组。</p>${state.playtest.decks.map(d => `<div class="log-item"><strong>${esc(d.name)}</strong><br><span class="muted-caption">${deckCardCount(d)} 张 · 点击抽牌</span><br><button class="ghost-button draw-button" data-draw-deck="${d.id}" style="margin-top:7px">抽一张</button><button class="ghost-button" data-shuffle-deck="${d.id}" style="margin:7px 0 0 5px">洗牌</button></div>`).join('')}`;
-  if (tab === 'log') return `<div class="section-label">操作记录</div>${state.playtest.logs.map(log => `<div class="log-item"><span class="log-time">${esc(log.time)}</span>${esc(log.text)}</div>`).join('')}`;
+  if (tab === 'log') return `<div class="section-label">操作记录</div>${state.playtest.logs.length ? state.playtest.logs.map(log => `<div class="log-item"><span class="log-time">${esc(log.time)}</span>${esc(log.text)}</div>`).join('') : '<div class="play-preview-empty">还没有操作记录</div>'}`;
   if (state.playtest.selectedPileId) return renderSelectedPilePanel(state.playtest.selectedPileId);
   return `<div class="section-label">试玩操作</div><p class="muted-caption" style="line-height:1.6">点击抽卡堆抽牌，点击卡堆管理卡牌。骰子左键掷骰、右键归零；计数器左键加一、右键执行设计规则。右键场上卡牌可横置或竖置。</p>`;
 }
@@ -1544,7 +1563,7 @@ function renderPlayCardPreview(card, hint = '移开鼠标后返回试玩操作')
   return `<div class="play-card-preview"><div class="preview-label">CARD PREVIEW · 正面</div><div class="playing-card ${templateClass}"><div class="playing-card-inner"><div class="card-rarity">${esc(card.rarity || '普通')} · ${esc(card.tag || '未分类')}</div><div class="card-title">${esc(card.name || '未命名卡牌')}</div><div class="card-art">${esc(card.art || '✦')}</div><div class="card-effect">${effectHTML || '<span style="color:#7a8585">卡牌效果将显示在这里</span>'}</div><div class="card-footer"><span>${esc(card.number || 'C-000')}</span><span>${esc(state.project?.name || 'CardFoundry')}</span></div></div></div>${hint ? `<div class="play-preview-hint">${esc(hint)}</div>` : ''}</div>`;
 }
 function bindPlaytestEvents() {
-  $$('[data-side-tab]').forEach(el => el.addEventListener('click', () => { $$('[data-side-tab]').forEach(x => x.classList.remove('active')); el.classList.add('active'); $('#playSideContent').innerHTML = renderPlaySide(el.dataset.sideTab); bindSideActions(); }));
+  $$('[data-side-tab]').forEach(el => el.addEventListener('click', () => { activePlaytestSideTab = el.dataset.sideTab; $$('[data-side-tab]').forEach(x => { x.classList.toggle('active', x === el); x.setAttribute('aria-selected', String(x === el)); }); $('#playSideContent').innerHTML = renderPlaySide(activePlaytestSideTab); bindSideActions(); }));
   bindSideActions();
   const activatePlayObject = el => {
     const o = currentBoard().objects.find(x => x.id === el.dataset.playObject);
@@ -1731,7 +1750,7 @@ function bindPlayCardPreviewEvents() {
   const restore = () => {
     if (!previewing) return;
     previewing = false;
-    const activeTab = $('[data-side-tab].active')?.dataset.sideTab || 'object';
+    const activeTab = activePlaytestSideTab || $('[data-side-tab].active')?.dataset.sideTab || 'object';
     sideContent.innerHTML = renderPlaySide(activeTab);
     bindSideActions();
   };
@@ -1747,6 +1766,12 @@ function bindPlayCardDragEvents() {
   if (!canvas) return;
   const getEntityId = event => event.dataTransfer.getData('application/x-card-entity') || event.dataTransfer.getData('text/plain') || activeDragEntityId;
   const isTableCard = entityId => state.playtest.tableCards.some(card => card.id === entityId);
+  const finishDrag = element => {
+    activeDragEntityId = '';
+    activeDragOffset = null;
+    element?.classList.remove('dragging');
+    clearCardDragPreview();
+  };
   const addDropTarget = (element, objectId = '') => {
     element.addEventListener('dragover', event => { event.preventDefault(); element.classList.add('play-canvas-drop-target'); event.dataTransfer.dropEffect = 'move'; });
     element.addEventListener('dragleave', () => element.classList.remove('play-canvas-drop-target'));
@@ -1756,6 +1781,7 @@ function bindPlayCardDragEvents() {
       const point = clientPointToPlayCanvas(event.clientX, event.clientY, canvas.getBoundingClientRect(), currentBoard());
       const position = playtestCardDropPosition(point, activeDragOffset, currentBoard());
       const targetObject = currentBoard().objects.find(object => object.id === objectId);
+      activeDragEntityId = ''; activeDragOffset = null; clearCardDragPreview();
       if (targetObject?.type === 'stack') putCardInPile(entityId, targetObject.id, isTableCard(entityId));
       else if (isTableCard(entityId)) moveTableCard(entityId, position.x, position.y, objectId);
       else placeCardOnTable(entityId, position.x, position.y, objectId);
@@ -1764,12 +1790,12 @@ function bindPlayCardDragEvents() {
   addDropTarget(canvas);
   $$('[data-play-object]', canvas).forEach(element => addDropTarget(element, element.dataset.playObject));
   $$('[data-play-card]').forEach(element => {
-    element.addEventListener('dragstart', event => { activeDragEntityId = element.dataset.playCard; activeDragOffset = handCardDragOffset(event, element); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); element.classList.add('dragging'); });
-    element.addEventListener('dragend', () => { activeDragEntityId = ''; activeDragOffset = null; element.classList.remove('dragging'); });
+    element.addEventListener('dragstart', event => { activeDragEntityId = element.dataset.playCard; activeDragOffset = handCardDragOffset(event, element); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); setCardDragPreview(event, element, false); element.classList.add('dragging'); });
+    element.addEventListener('dragend', () => finishDrag(element));
   });
   $$('[data-table-card]').forEach(element => {
-    element.addEventListener('dragstart', event => { const entity = state.playtest.tableCards.find(card => card.id === element.dataset.tableCard); activeDragEntityId = element.dataset.tableCard; activeDragOffset = tableCardDragOffset(event, entity, canvas); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); element.classList.add('dragging'); });
-    element.addEventListener('dragend', () => { activeDragEntityId = ''; activeDragOffset = null; element.classList.remove('dragging'); });
+    element.addEventListener('dragstart', event => { const entity = state.playtest.tableCards.find(card => card.id === element.dataset.tableCard); activeDragEntityId = element.dataset.tableCard; activeDragOffset = tableCardDragOffset(event, entity, canvas); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-card-entity', activeDragEntityId); event.dataTransfer.setData('text/plain', activeDragEntityId); setCardDragPreview(event, element, Boolean(entity?.tapped)); element.classList.add('dragging'); });
+    element.addEventListener('dragend', () => finishDrag(element));
     element.addEventListener('contextmenu', event => { event.preventDefault(); toggleTableCardTapped(element.dataset.tableCard); });
   });
   const handZone = $('#activeHandDropZone');
@@ -1790,9 +1816,36 @@ function bindPlayCardDragEvents() {
     target.addEventListener('drop', event => {
       event.preventDefault(); event.stopPropagation(); target.classList.remove('hand-drop-target');
       const entityId = getEntityId(event);
+      activeDragEntityId = ''; activeDragOffset = null; clearCardDragPreview();
       if (isTableCard(entityId)) returnCardToHand(entityId, 1);
     });
   });
+}
+function clearCardDragPreview() {
+  activeCardDragPreview?.remove();
+  activeCardDragPreview = null;
+}
+function setCardDragPreview(event, element, tapped = false) {
+  clearCardDragPreview();
+  const wrapper = document.createElement('div');
+  wrapper.className = `card-drag-preview ${tapped ? 'tapped' : ''}`;
+  const card = element.cloneNode(true);
+  card.classList.remove('dragging', 'tapped');
+  card.classList.add('card-drag-preview-card');
+  card.removeAttribute('draggable');
+  card.removeAttribute('tabindex');
+  card.removeAttribute('data-play-card');
+  card.removeAttribute('data-table-card');
+  card.removeAttribute('data-preview-card');
+  wrapper.appendChild(card);
+  document.body.appendChild(wrapper);
+  activeCardDragPreview = wrapper;
+  const rect = element.getBoundingClientRect();
+  const width = tapped ? PLAYTEST_CARD_HEIGHT : PLAYTEST_CARD_WIDTH;
+  const height = tapped ? PLAYTEST_CARD_WIDTH : PLAYTEST_CARD_HEIGHT;
+  const offsetX = Math.max(0, Math.min(width, event.clientX - rect.left));
+  const offsetY = Math.max(0, Math.min(height, event.clientY - rect.top));
+  event.dataTransfer.setDragImage(wrapper, offsetX, offsetY);
 }
 function clientPointToPlayCanvas(clientX, clientY, rect, board) {
   const scaleX = rect.width / board.width || 1;
@@ -1858,6 +1911,7 @@ function toggleTableCardTapped(entityId) {
 }
 function selectPile(pileId) {
   state.playtest.selectedPileId = pileId;
+  activePlaytestSideTab = 'object';
   renderPlaytest();
 }
 function placeCardOnTable(entityId, x, y, objectId = '') {
@@ -2037,7 +2091,7 @@ function openImportedProjectModal(imported, fileName) {
     projectLibrary[importedState.project.id] = JSON.parse(JSON.stringify(importedState));
     state = importedState;
     undoStack = []; redoStack = [];
-    closeModal(); renderAll(); switchView('design'); saveState(true);
+    updateHistoryControls(); closeModal(); renderAll(); switchView('design'); saveState(true);
     toast(`项目「${name}」已导入并保存到项目区域`, 'success');
   };
   $('#closeModal').onclick = closeModal; $('#cancelModal').onclick = closeModal;
@@ -2128,6 +2182,7 @@ function bindGlobal() {
   $('#cardImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'cards'); e.target.value = ''; }); $('#deckImportInput').addEventListener('change', e => { if (e.target.files[0]) importTable(e.target.files[0], 'deck'); e.target.value = ''; });
   document.addEventListener('mousedown', e => { if (!e.target.closest?.('.rich-color-control')) closeRichColorPopovers(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeRichColorPopovers(); if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); } if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveState(true); toast('已保存', 'success'); } });
+  updateHistoryControls();
 }
 
 function openNewProjectModal() {
@@ -2136,10 +2191,11 @@ function openNewProjectModal() {
   $('#modalRoot').innerHTML = `<div class="modal-backdrop" id="modalBackdrop"><div class="modal"><button class="modal-close" id="closeModal">×</button><h3>项目</h3><p>切换已有项目，或创建一个全新的桌游项目。</p><div class="project-picker-list">${items.map(item => `<div class="project-picker-item ${item.project.id === state.project.id ? 'current' : ''}"><div><div class="project-picker-name">${esc(item.project.name)}</div><div class="project-picker-meta">${item.cards?.length || 0} 张单卡 · ${item.boards?.length || 0} 个版图</div></div>${item.project.id === state.project.id ? '<span class="tab-count">当前</span>' : `<button class="ghost-button" data-switch-project="${item.project.id}">打开</button>`}</div>`).join('')}</div><div class="section-label">新建项目</div><div class="field"><label>项目名称</label><input id="newProjectNameInput" value="未命名桌游" maxlength="60"></div><div class="field"><label>项目描述（可选）</label><textarea id="newProjectDescriptionInput" placeholder="写一句关于这个桌游的介绍"></textarea></div><div class="modal-actions"><button class="ghost-button" id="cancelModal">取消</button><button class="primary-button" id="confirmNewProject">创建项目</button></div></div></div>`;
   $('#closeModal').onclick = closeModal; $('#cancelModal').onclick = closeModal; $('#modalBackdrop').addEventListener('click', event => { if (event.target.id === 'modalBackdrop') closeModal(); });
   const nameInput = $('#newProjectNameInput'); nameInput.focus(); nameInput.select();
-  $$('[data-switch-project]').forEach(button => button.addEventListener('click', () => { rememberProject(); state = JSON.parse(JSON.stringify(projectLibrary[button.dataset.switchProject])); normalizeState(); closeModal(); renderAll(); saveState(true); toast(`已打开「${state.project.name}」`, 'success'); }));
+  $$('[data-switch-project]').forEach(button => button.addEventListener('click', () => { rememberProject(); state = JSON.parse(JSON.stringify(projectLibrary[button.dataset.switchProject])); normalizeState(); undoStack = []; redoStack = []; updateHistoryControls(); closeModal(); renderAll(); saveState(true); toast(`已打开「${state.project.name}」`, 'success'); }));
   $('#confirmNewProject').onclick = () => {
     const name = nameInput.value.trim() || '未命名桌游'; const description = $('#newProjectDescriptionInput').value.trim();
     mutate(() => { rememberProject(); state = createBlankProject(name, description); });
+    undoStack = []; redoStack = []; updateHistoryControls();
     closeModal(); renderAll(); switchView('design'); toast(`项目「${name}」已创建`, 'success');
   };
 }

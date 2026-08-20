@@ -57,6 +57,8 @@ button { cursor: pointer; }
 .save-dot.error { background: var(--pink); }
 .icon-button, .avatar { border: 1px solid var(--line); background: var(--panel); color: var(--muted); width: 31px; height: 31px; border-radius: 9px; }
 .icon-button:hover, .avatar:hover { color: var(--text); border-color: var(--line-strong); }
+.icon-button:disabled { cursor: not-allowed; opacity: .34; color: var(--dim); border-color: var(--line); }
+.icon-button:disabled:hover { color: var(--dim); border-color: var(--line); }
 .avatar { color: #1b2014; background: var(--lime); border: 0; font-weight: 800; margin-left: 7px; }
 
 .workspace { padding: 0 28px 34px; max-width: 1800px; margin: 0 auto; }
@@ -345,7 +347,7 @@ button { cursor: pointer; }
 .play-card-name { font-size: 10px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .play-card-art { height: 48px; flex: 0 0 48px; display: grid; place-items: center; margin: 7px 0; border-radius: 5px; background: linear-gradient(135deg,#4b5968,#a9b5b9); color: white; font-size: 20px; }
 .play-card-effect { font-family: 'Noto Sans SC', sans-serif; font-size: 7px; line-height: 1.45; height: 48px; overflow: hidden; overflow-wrap: anywhere; }
-.hand-card.dragging { opacity: .45; }
+.hand-card.dragging { visibility: hidden; }
 .board-object.draw-zone { cursor: pointer; border-style: solid; }
 .board-object.interactive-control { cursor: pointer; }
 .board-object.draw-zone:focus-visible, .board-object.interactive-control:focus-visible { outline: 2px solid var(--lime); outline-offset: 3px; }
@@ -353,9 +355,13 @@ button { cursor: pointer; }
 .draw-zone-hint { margin-top: 2px; padding: 4px 8px; border-radius: 999px; color: #161a12; background: var(--lime); font-size: 9px; font-weight: 800; line-height: 1; }
 .played-card { position: absolute; width: 94px; height: 132px; border-radius: 8px; padding: 8px; background: linear-gradient(145deg,#f7f3e9,#c4ced2); color: #263233; box-shadow: 0 10px 22px rgba(0,0,0,.32); cursor: grab; z-index: 4; }
 .played-card:hover { box-shadow: 0 16px 30px rgba(0,0,0,.45); }
-.played-card.dragging { opacity: .45; }
+.played-card.dragging { visibility: hidden; }
 .played-card.tapped { transform: rotate(90deg); }
 .played-card.tapped:hover { transform: rotate(90deg); }
+.card-drag-preview { position: fixed; left: -1000px; top: -1000px; width: 94px; height: 132px; pointer-events: none; z-index: 1000; }
+.card-drag-preview.tapped { width: 132px; height: 94px; }
+.card-drag-preview-card { position: absolute; left: 0 !important; top: 0 !important; margin: 0; opacity: 1; visibility: visible; pointer-events: none; transform: none; box-shadow: 0 14px 28px rgba(0,0,0,.42); }
+.card-drag-preview.tapped .card-drag-preview-card { left: 19px !important; top: -19px !important; transform: rotate(90deg); }
 .play-canvas-drop-target { outline: 1px dashed rgba(213,245,103,.3); outline-offset: -5px; }
 .playtest-card-arrive { animation: playtest-card-arrive .32s cubic-bezier(.2,.8,.3,1) both; }
 .playtest-draw-feedback { animation: playtest-draw-feedback .34s ease-out both; }
